@@ -1,0 +1,36 @@
+:root {
+  color-scheme: dark;
+  --display-bg: #100c0b;
+  --display-panel: #1b1210;
+  --display-line: #60422a;
+  --display-text: #fff0d0;
+  --display-muted: #c4ad8a;
+  --display-accent: #ffcc62;
+  font-family: system-ui, sans-serif;
+  background: radial-gradient(ellipse at 50% 0, #45201b 0%, transparent 42%), var(--display-bg);
+  color: var(--display-text);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; }
+.online-lab { padding: clamp(16px, 5vw, 46px) 14px; }
+.online-header {
+  width: min(100%, 620px);
+  margin: 0 auto 20px;
+  padding: clamp(15px, 4vw, 27px) 12px;
+  text-align: center;
+  border: 1px solid var(--display-line);
+  border-top: 4px solid #b83b29;
+  border-radius: 6px;
+  background: var(--display-panel);
+}
+.online-header h1 { margin: 0; font: 800 clamp(2.25rem, 9vw, 4.25rem)/1 Georgia, serif; }
+.online-header p { margin: 9px 0 0; font-weight: 650; color: var(--display-accent); }
+.online-lab .ai-options { grid-template-columns: 1fr; }
+.online-lab .display-start-button {
+  border: 1px solid #d46a47;
+  border-radius: 4px;
+  background: #ae3525;
+  cursor: pointer;
+  font: 700 clamp(1.25rem, 4vw, 1.8rem)/1.2 Georgia, serif;
+}
