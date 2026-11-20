@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.vercel/
+.env*
+!.env.example
+*.sqlite*
+hit-dot-clown-database-dataset*.json
+hit-dot-clown-playtest-archive*.json
+hit-dot-clown-progressive-*.json

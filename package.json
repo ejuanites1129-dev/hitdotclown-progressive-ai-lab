@@ -1,0 +1,20 @@
+{
+  "name": "hit-dot-clown-ai-lab-online",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "scripts": {
+    "build": "vite build",
+    "export:dataset": "node --env-file=.env.local scripts/dataset.mjs export",
+    "import:sqlite": "node --env-file=.env.local scripts/dataset.mjs import-sqlite"
+  },
+  "dependencies": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.0.2",
+    "vite": "8.0.13"
+  }
+}
