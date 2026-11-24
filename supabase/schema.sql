@@ -34,20 +34,18 @@ stable
 security invoker
 set search_path = ''
 as $$
-  with counts as (
-    select count(*) as runs, count(participant) as coded_runs,
-      count(distinct participant) filter (where policy = 'collect') as randomized_players
-    from public.ai_lab_runs
-  )
   select jsonb_build_object(
-    'runs', runs,
-    'codedRuns', coded_runs,
-    'randomizedPlayers', randomized_players,
-    'sessions', case when coded_runs > p_known_coded_runs and randomized_players >= 5 then
+    'runs', (select count(*) from public.ai_lab_runs),
+    'codedRuns', (select count(participant) from public.ai_lab_runs),
+    'randomizedPlayers', (select count(distinct case when policy = 'collect' then participant end)
+      from public.ai_lab_runs),
+    'sessions', case
+      when (select count(participant) from public.ai_lab_runs) > p_known_coded_runs
+       and (select count(distinct case when policy = 'collect' then participant end)
+         from public.ai_lab_runs) >= 5 then
       (select jsonb_agg(run_data order by id) from public.ai_lab_runs where participant is not null)
     end
-  )
-  from counts;
+  );
 $$;
 
 revoke all on function public.hitdotclown_ai_lab_snapshot(integer) from public, anon, authenticated;
@@ -60,37 +58,6 @@ alter table public.ai_progressive_runs enable row level security;
 alter table public.ai_progressive_models enable row level security;
 revoke all on public.ai_progressive_runs, public.ai_progressive_models from public, anon, authenticated, service_role;
 grant select, insert on public.ai_progressive_runs, public.ai_progressive_models to service_role;
-
-create or replace function public.hitdotclown_progressive_snapshot(p_known_coded_runs integer)
-returns jsonb
-language sql
-stable
-security invoker
-set search_path = ''
-as $$
-  with counts as (
-    select
-      count(*) as runs,
-      count(participant) as coded_runs,
-      count(distinct case
-        when policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1 then participant
-        else null
-      end) as adaptive_players
-    from public.ai_progressive_runs
-  )
-  select jsonb_build_object(
-    'runs', runs,
-    'codedRuns', coded_runs,
-    'adaptivePlayers', adaptive_players,
-    'sessions', case when coded_runs > p_known_coded_runs and adaptive_players >= 5 then
-      (select jsonb_agg(run_data order by id) from public.ai_progressive_runs where participant is not null)
-    end
-  )
-  from counts;
-$$;
-
-revoke all on function public.hitdotclown_progressive_snapshot(integer) from public, anon, authenticated;
-grant execute on function public.hitdotclown_progressive_snapshot(integer) to service_role;
 
 -- Preserve ESP32 input provenance in its source table; the progressive model is shared with browser runs.
 create table if not exists public.ai_progressive_esp32_runs (like public.ai_lab_runs including all);
