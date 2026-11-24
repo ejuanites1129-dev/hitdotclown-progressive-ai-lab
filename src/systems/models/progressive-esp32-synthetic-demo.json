@@ -73,6 +73,7 @@
     "heldOutRounds": 157,
     "heldOutCleared": 112,
     "evaluationProvenance": "held-out simulated participants",
+    "evaluationScope": "Predictive accuracy on held-out simulated playthroughs.",
     "tree": {
       "accuracy": 0.7515923566878981,
       "brier": 0.17710918310185814,

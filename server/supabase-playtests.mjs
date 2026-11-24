@@ -65,9 +65,12 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
     },
     async status() {
       let current = await latest();
-      const { runs, codedRuns, randomizedPlayers, syntheticRuns, sessions } = await rest('rpc/' + snapshot, {
+      const snapshotData = await rest('rpc/' + snapshot, {
         body: { p_known_coded_runs: current?.coded_runs ?? -1 },
       });
+      const { runs, codedRuns, syntheticRuns, sessions } = snapshotData;
+      const playerCount = profile.modelInput === 'combined'
+        ? snapshotData.adaptivePlayers ?? 0 : snapshotData.randomizedPlayers;
       let training = current ? 'trained' : 'waiting-for-players';
       if (sessions) {
         const result = profile.train(sessions, input);
@@ -82,7 +85,8 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
           current = await latest();
         }
       }
-      const summary = { runs, codedRuns, randomizedPlayers, syntheticRuns: syntheticRuns ?? 0, training,
+      const summary = { runs, codedRuns, syntheticRuns: syntheticRuns ?? 0, training,
+        ...(profile.modelInput === 'combined' ? { adaptivePlayers: playerCount } : { randomizedPlayers: playerCount }),
         active: current ? publicModel(current) : null };
       return input === 'combined' ? { browser: summary, esp32: summary } : { [input]: summary };
     },

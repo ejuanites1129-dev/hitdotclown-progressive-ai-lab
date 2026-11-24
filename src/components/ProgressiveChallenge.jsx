@@ -228,7 +228,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (!PARTICIPANT_CODE.test(normalized)) { setNotice('Enter your full playtest code.'); return; }
     setParticipant(normalized);
     setReturning(false);
-    setPolicy('collect');
+    setPolicy('adaptive');
     setNotice('');
   }
 
@@ -315,11 +315,10 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         <span className="ai-pill">{targetInput === 'esp32' ? 'Unranked physical game' : 'Unranked browser game'}</span>
         <p>Start with three flashes. Every clear adds one step. Your score and three lives carry across cycles.</p>
       </div>
-      <label htmlFor="progressive-pace">Round settings</label>
+      <label htmlFor="progressive-pace">Pacing</label>
       <select id="progressive-pace" value={policy} onChange={(event) => setPolicy(event.target.value)} disabled={!ready}>
         <option value="adaptive">Adaptive pace</option>
         <option value="fixed">Fixed medium pace</option>
-        <option value="collect">Randomized pace</option>
       </select>
       <label htmlFor="progressive-input">Targets</label>
       <select id="progressive-input" value={targetInput} onChange={(event) => { setTargetInput(event.target.value); setDeviceMessage(''); }} disabled={!ready}>
@@ -340,15 +339,15 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       </section>}
       {policy === 'adaptive' && <p className="ai-note">{active
         ? active.model?.provenance === 'synthetic-seeded'
-          ? `Shared decision tree uses synthetic seed examples and real browser/ESP32 playtests; evaluation uses held-out real players. Model ${active.id.slice(0, 8)}.`
-          : `Shared decision tree trained on browser and ESP32 playtests. Model ${active.id.slice(0, 8)}.`
+          ? `Shared decision tree uses simulated seed examples plus saved coded playthroughs. Model ${active.id.slice(0, 8)}.`
+          : `Shared decision tree is active for Adaptive Pace on browser and ESP32. Model ${active.id.slice(0, 8)}.`
         : targetInput === 'esp32'
-          ? 'Simulated-data model active for ESP32 practice. Coded randomized runs from browser and ESP32 will feed the shared model.'
-          : 'Simulated-data model loaded. Coded randomized browser and ESP32 playtests feed one shared training pool.'}</p>}
+          ? 'Simulated-data model active for ESP32 practice. Coded Adaptive Pace playthroughs from browser and ESP32 feed the shared model.'
+          : 'Simulated-data model loaded. Coded Adaptive Pace playthroughs from browser and ESP32 feed one shared training pool.'}</p>}
       <section className="ai-code" aria-label="Class playtest">
         <h3>Class playtest</h3>
         {participant ? <div className="ai-actions">
-          <p>Playtest code <strong className="ai-participant-id">{participant}</strong></p>
+          <p>Anonymous playtest code <strong className="ai-participant-id">{participant}</strong>. Coded Adaptive runs save automatically for training.</p>
           <button type="button" onClick={() => { setParticipant(null); setCode(''); if (policy === 'collect') setPolicy('adaptive'); }}>Switch to guest</button>
         </div> : returning ? <form onSubmit={(event) => { event.preventDefault(); applyCode(code); }}>
           <label htmlFor="progressive-code">Your playtest code</label>
@@ -358,8 +357,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
             <button type="button" onClick={() => setReturning(false)}>Cancel</button>
           </div>
         </form> : <>
-          <p className="ai-note">Join to try randomized pacing. Keep your code for repeat runs.</p>
-          <div className="ai-actions"><button type="button" disabled={!ready} onClick={() => applyCode(createParticipantCode())}>Join playtest</button>
+          <p className="ai-note">Play normally in Adaptive Pace. Join to link your Adaptive games under an anonymous code for model training. Keep the code for repeat visits. Guest and Fixed pace runs are not training examples; no name or email is collected.</p>
+          <div className="ai-actions"><button type="button" disabled={!ready} onClick={() => applyCode(createParticipantCode())}>Join and contribute</button>
             <button type="button" disabled={!ready} onClick={() => setReturning(true)}>I have a code</button></div>
         </>}
       </section>
@@ -400,10 +399,10 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     </section>}
     {(!view || ended) && <section className="ai-panel ai-archive" aria-label="Progressive playtest database">
       <h3>Shared progressive playtest database</h3>
-      {summary && <p>Saved runs <strong>{summary.runs}</strong> · Synthetic seed runs <strong>{summary.syntheticRuns ?? 0}</strong> · Real randomized players with two or more cycles <strong>{summary.randomizedPlayers}</strong></p>}
-      <p className="ai-note">Browser and ESP32 runs share this pool. A participant who uses both modes counts once.</p>
-      {summary?.training === 'waiting-for-players' && <p>Training needs five coded randomized players who reached cycle 2 in either Browser buttons or ESP32 mode.</p>}
-      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both clears and failures from the real assigned players across the shared pool.</p>}
+      {summary && <p>Saved runs <strong>{summary.runs}</strong> · Synthetic seed runs <strong>{summary.syntheticRuns ?? 0}</strong> · Participant codes with Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
+      <p className="ai-note">Coded Adaptive runs from Browser and ESP32 share this pool. A participant who uses both modes counts once.</p>
+      {summary?.training === 'waiting-for-players' && <p>Model training needs five distinct participant codes with an Adaptive run reaching cycle 2, from Browser buttons or ESP32 mode.</p>}
+      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from the coded Adaptive players.</p>}
       {database.available === false && <p>{targetInput === 'esp32'
         ? 'The ESP32 playtest table is not available yet. Run the updated Supabase schema. This run is kept in the browser backup and will retry later.'
         : 'The database is unavailable. Saved browser runs will retry when it reconnects.'}</p>}

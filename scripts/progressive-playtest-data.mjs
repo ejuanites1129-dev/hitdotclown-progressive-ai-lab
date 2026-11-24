@@ -73,22 +73,25 @@ export function trainProgressive(runs, synthetic = false, input = 'browser') {
     return cleaned;
   });
   const rows = progressiveExamples(sessions);
-  const randomized = rows.filter(({ policy, synthetic: isSynthetic }) => policy === 'collect'
+  // Real training and evaluation use normal Adaptive Pace runs. The built-in
+  // synthetic baseline keeps its randomized examples for initial coverage.
+  const cohortPolicy = synthetic === true ? 'collect' : 'adaptive';
+  const cohort = rows.filter(({ policy, synthetic: isSynthetic }) => policy === cohortPolicy
     && (allowMixed ? !isSynthetic : isSynthetic === synthetic));
-  const players = [...new Set(randomized.map(({ participant }) => participant))].sort((a, b) => hash(a).localeCompare(hash(b)));
+  const players = [...new Set(cohort.map(({ participant }) => participant))].sort((a, b) => hash(a).localeCompare(hash(b)));
   if (players.length < 5) return { training: 'waiting-for-players' };
   const heldOut = new Set(players.slice(0, Math.ceil(players.length / 5)));
-  const testing = randomized.filter(({ participant }) => heldOut.has(participant));
-  const realTrainingRandomized = allowMixed
-    ? randomized.filter(({ participant }) => !heldOut.has(participant))
-    : randomized.filter(({ participant }) => !heldOut.has(participant));
-  if (!realTrainingRandomized.some(({ completed }) => completed) || realTrainingRandomized.every(({ completed }) => completed)) {
+  const testing = cohort.filter(({ participant }) => heldOut.has(participant));
+  const realTrainingAdaptive = cohort.filter(({ participant }) => !heldOut.has(participant));
+  if (!realTrainingAdaptive.some(({ completed }) => completed) || realTrainingAdaptive.every(({ completed }) => completed)) {
     return { training: 'waiting-for-outcomes' };
   }
   const training = allowMixed
     ? [...rows.filter(({ synthetic: isSynthetic }) => isSynthetic),
-      ...rows.filter(({ synthetic: isSynthetic, participant }) => !isSynthetic && !heldOut.has(participant))]
-    : rows.filter(({ participant }) => !heldOut.has(participant));
+      ...rows.filter(({ synthetic: isSynthetic, participant, policy }) => !isSynthetic
+        && !heldOut.has(participant) && policy === 'adaptive')]
+    : rows.filter(({ participant, policy }) => !heldOut.has(participant)
+      && (synthetic || policy === 'adaptive'));
   const tree = fitTree(training, 0, PROGRESSIVE_FEATURES);
   const lengthRates = new Map();
   for (const { features: { sequenceLength }, completed } of training) {
@@ -121,7 +124,10 @@ export function trainProgressive(runs, synthetic = false, input = 'browser') {
     trainingSyntheticParticipants: new Set(training.filter(({ synthetic: isSynthetic }) => isSynthetic).map(({ participant }) => participant)).size,
     heldOutParticipants: heldOut.size, trainingRounds: training.length, heldOutRounds: testing.length,
     heldOutCleared: testing.filter(({ completed }) => completed).length,
-    evaluationProvenance: allowMixed ? 'held-out real randomized participants' : synthetic ? 'held-out simulated participants' : 'held-out real randomized participants',
+    evaluationProvenance: allowMixed ? 'held-out coded adaptive players' : synthetic ? 'held-out simulated participants' : 'held-out coded adaptive players',
+    evaluationScope: allowMixed || !synthetic
+      ? 'Predictive accuracy on held-out adaptive playthroughs; not a randomized comparison of pacing policies.'
+      : 'Predictive accuracy on held-out simulated playthroughs.',
     tree: evaluate((features) => predictCompletion(tree, features)),
     lengthOnlyBaseline: evaluate(({ sequenceLength }) => {
       const counts = lengthRates.get(sequenceLength);

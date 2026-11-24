@@ -70,14 +70,14 @@ set search_path = ''
 as $$
   with counts as (
     select count(*) as runs, count(participant) as coded_runs,
-      count(distinct participant) filter (where policy = 'collect' and jsonb_array_length(run_data->'rounds') > 1) as randomized_players
+      count(distinct participant) filter (where policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1) as adaptive_players
     from public.ai_progressive_runs
   )
   select jsonb_build_object(
     'runs', runs,
     'codedRuns', coded_runs,
-    'randomizedPlayers', randomized_players,
-    'sessions', case when coded_runs > p_known_coded_runs and randomized_players >= 5 then
+    'adaptivePlayers', adaptive_players,
+    'sessions', case when coded_runs > p_known_coded_runs and adaptive_players >= 5 then
       (select jsonb_agg(run_data order by id) from public.ai_progressive_runs where participant is not null)
     end
   )
@@ -138,13 +138,13 @@ as $$
       where not coalesce((run_data->>'synthetic')::boolean, false))
       + (select count(participant) from public.ai_progressive_esp32_runs
         where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false)),
-    'randomizedPlayers', (select count(distinct participants.participant) from (
+    'adaptivePlayers', (select count(distinct participants.participant) from (
       select participant from public.ai_progressive_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'collect'
+      where not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
         and jsonb_array_length(run_data->'rounds') > 1
       union
       select participant from public.ai_progressive_esp32_runs
-      where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'collect'
+      where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
         and jsonb_array_length(run_data->'rounds') > 1
     ) as participants),
     'sessions', case
@@ -152,11 +152,11 @@ as $$
         + (select count(*) from public.ai_progressive_esp32_runs)) > p_known_coded_runs
        and (select count(distinct participants.participant) from (
           select participant from public.ai_progressive_runs
-          where not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'collect'
+          where not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
             and jsonb_array_length(run_data->'rounds') > 1
           union
           select participant from public.ai_progressive_esp32_runs
-          where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'collect'
+          where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
             and jsonb_array_length(run_data->'rounds') > 1
         ) as participants) >= 5
       then (select jsonb_agg(all_runs.run_data order by all_runs.id) from (
@@ -190,15 +190,15 @@ as $$
       where not coalesce((run_data->>'synthetic')::boolean, false)),
     'codedRuns', (select count(participant) from public.ai_progressive_esp32_runs
       where not coalesce((run_data->>'synthetic')::boolean, false)),
-    'randomizedPlayers', (select count(distinct participant) from public.ai_progressive_esp32_runs
+    'adaptivePlayers', (select count(distinct participant) from public.ai_progressive_esp32_runs
       where not coalesce((run_data->>'synthetic')::boolean, false)
-        and policy = 'collect' and jsonb_array_length(run_data->'rounds') > 1),
+        and policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1),
     'sessions', case
       when (select count(participant) from public.ai_progressive_esp32_runs
         where not coalesce((run_data->>'synthetic')::boolean, false)) > p_known_coded_runs
        and (select count(distinct participant) from public.ai_progressive_esp32_runs
         where not coalesce((run_data->>'synthetic')::boolean, false)
-          and policy = 'collect' and jsonb_array_length(run_data->'rounds') > 1) >= 5
+          and policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1) >= 5
       then (select jsonb_agg(run_data order by id) from public.ai_progressive_esp32_runs where participant is not null)
     end
   );
