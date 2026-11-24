@@ -6,10 +6,18 @@ import { readArchivedRuns, saveArchivedRun } from './playtestArchive.js';
 export const PROGRESSIVE_RUN = 'hit-dot-clown-progressive-run-v1';
 export const PROGRESSIVE_ARCHIVE = 'hit-dot-clown-progressive-archive-v1';
 export const PROGRESSIVE_MODEL = 'hit-dot-clown-progressive-tree-v1';
+export const PROGRESSIVE_CONSENT_VERSION = 'adaptive-playtest-consent-v1';
 export const PROGRESSIVE_FEATURES = Object.freeze([
   'sequenceLength', 'speed', 'inputMode', 'livesAtStart', 'previousSpeed', 'previousMisses', 'previousMsPerHit', 'roundSeconds',
 ]);
 const storagePrefix = 'hit-dot-clown-progressive-playtest:';
+export function normalizeParticipantLabel(value) {
+  if (typeof value !== 'string') return null;
+  const label = value.normalize('NFKC').trim();
+  if (!label || [...label].length > 24 || /[\u0000-\u001f\u007f]/u.test(label)) return null;
+  return label;
+}
+export const participantGroupKey = (value) => normalizeParticipantLabel(value)?.toLowerCase() ?? '';
 export const readProgressiveArchive = (storage) => readArchivedRuns(storage, storagePrefix, PROGRESSIVE_ARCHIVE,
   (run) => run?.format === PROGRESSIVE_RUN && Array.isArray(run.rounds) && run.rounds.length > 0);
 export const saveProgressiveRun = (storage, run) => saveArchivedRun(storage, storagePrefix, run);

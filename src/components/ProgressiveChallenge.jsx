@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createParticipantCode, PARTICIPANT_CODE, SPEEDS } from '../systems/aiPractice.js';
+import { SPEEDS } from '../systems/aiPractice.js';
 import { STATUS } from '../systems/gameLogic.js';
-import { chooseProgressivePace, ProgressiveGame, PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
+import { chooseProgressivePace, normalizeParticipantLabel, ProgressiveGame, PROGRESSIVE_CONSENT_VERSION,
+  PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
 import { DEFAULT_ROUND_SECONDS } from '../systems/timerSettings.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
 import { exportDatabaseDataset, usePlaytestDatabase } from './usePlaytestDatabase.js';
@@ -44,9 +45,9 @@ function phase(state) {
 export default function ProgressiveChallenge({ onControlsChange, browserOnly = false, roundSeconds = DEFAULT_ROUND_SECONDS, pilotLink }) {
   const [policy, setPolicy] = useState('adaptive');
   const [targetInput, setTargetInput] = useState('browser');
-  const [participant, setParticipant] = useState(null);
-  const [code, setCode] = useState('');
-  const [returning, setReturning] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [consentName, setConsentName] = useState('');
+  const [consentError, setConsentError] = useState('');
   const [view, setView] = useState(null);
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState('');
@@ -79,9 +80,11 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     running.current = null;
     const completed = { ...current.run, score: state.score, rounds: [...current.engine.rounds], finishedAt: new Date().toISOString() };
     setResult(completed);
-    saveToDatabase(completed);
-    try { saveProgressiveRun(localStorage, completed); }
-    catch { setNotice('Browser backup is unavailable. Download this playthrough to keep a copy.'); }
+    if (completed.consentVersion) {
+      saveToDatabase(completed);
+      try { saveProgressiveRun(localStorage, completed); }
+      catch { setNotice('Browser backup is unavailable. Download this playthrough to keep a copy.'); }
+    }
   }, [saveToDatabase]);
 
   function finishHardwareCycle(tracker, state, completed) {
@@ -107,9 +110,11 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (!tracker.run.rounds.length) return;
     const completed = { ...tracker.run, score: state.score, finishedAt: new Date().toISOString() };
     setResult(completed);
-    saveToDatabase(completed);
-    try { saveProgressiveRun(localStorage, completed); }
-    catch { setDeviceMessage('This physical run is saved to Supabase. The browser backup could not be updated.'); }
+    if (completed.consentVersion) {
+      saveToDatabase(completed);
+      try { saveProgressiveRun(localStorage, completed); }
+      catch { setDeviceMessage('This physical run is saved to Supabase. The browser backup could not be updated.'); }
+    }
   }
 
   function handleHardwareEvent(event) {
@@ -222,27 +227,17 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       ready: targetInput === 'esp32' && deviceState?.status === STATUS.READY, locked: playing });
   }, [onControlsChange, playing, targetInput, deviceConnected, deviceState?.status]);
 
-  function applyCode(value) {
-    const normalized = value.trim().toUpperCase();
-    if (!PARTICIPANT_CODE.test(normalized)) { setNotice('Enter your full playtest code.'); return; }
-    setParticipant(normalized);
-    setReturning(false);
-    setPolicy('adaptive');
-    setNotice('');
-  }
-
   async function connectEsp32() {
     setDeviceMessage('Choose the ESP32 USB port. Close Arduino Serial Monitor first.');
     try { await deviceRef.current?.connect(); }
     catch (error) { setDeviceMessage(error.message); }
   }
 
-  async function startHardware() {
+  async function startHardware(participant, consentVersion) {
     if (!deviceConnected || !deviceHello?.adaptivePace || deviceState?.status !== STATUS.READY) {
       setDeviceMessage('Connect the ESP32 with the AI compatible firmware and wait for Ready.');
       return;
     }
-    if (policy === 'collect' && !participant) return;
     const tracker = {
       policy,
       model: policy === 'adaptive' ? active?.model ?? null : null,
@@ -251,7 +246,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       probability: undefined,
       currentCycle: null,
       run: { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'esp32', participant, policy, roundSeconds,
-        modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(), score: 0, rounds: [] },
+        modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(), score: 0, rounds: [],
+        ...(consentVersion ? { consentVersion } : {}) },
     };
     hardwareRun.current = tracker;
     activeTarget.current = null;
@@ -269,16 +265,39 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     }
   }
 
-  function start() {
-    if (running.current || (policy === 'collect' && !participant)) return;
-    if (targetInput === 'esp32') { void startHardware(); return; }
+  function beginChallenge(participant = null, consentVersion = null) {
+    setConsentOpen(false);
+    setConsentError('');
+    if (targetInput === 'esp32') { void startHardware(participant, consentVersion); return; }
     const engine = new ProgressiveGame({ policy, model: policy === 'adaptive' ? model : null, roundSeconds });
     const run = { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'browser', participant, policy, roundSeconds,
-      modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString() };
+      modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(),
+      ...(consentVersion ? { consentVersion } : {}) };
     running.current = { engine, run };
     setResult(null);
     setNotice('');
     setView(engine.start());
+  }
+
+  function start() {
+    if (running.current || hardwareRun.current) return;
+    if (policy === 'adaptive') {
+      setConsentName('');
+      setConsentError('');
+      setConsentOpen(true);
+      return;
+    }
+    beginChallenge();
+  }
+
+  function agreeAndStart(event) {
+    event.preventDefault();
+    const username = normalizeParticipantLabel(consentName);
+    if (!username) {
+      setConsentError('Enter your leaderboard username (up to 24 characters).');
+      return;
+    }
+    beginChallenge(username, PROGRESSIVE_CONSENT_VERSION);
   }
 
   function hit(target) {
@@ -339,29 +358,33 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       {policy === 'adaptive' && <p className="ai-note">{active
         ? `Human-playtest decision tree active for Adaptive Pace on browser and ESP32. Model ${active.id.slice(0, 8)}.`
         : 'No human-trained model yet. Adaptive Pace uses the rule-based fallback while coded human playthroughs are collected.'}</p>}
-      <section className="ai-code" aria-label="Class playtest">
-        <h3>Class playtest</h3>
-        {participant ? <div className="ai-actions">
-          <p>Anonymous playtest code <strong className="ai-participant-id">{participant}</strong>. Coded Adaptive runs save automatically for training.</p>
-          <button type="button" onClick={() => { setParticipant(null); setCode(''); if (policy === 'collect') setPolicy('adaptive'); }}>Switch to guest</button>
-        </div> : returning ? <form onSubmit={(event) => { event.preventDefault(); applyCode(code); }}>
-          <label htmlFor="progressive-code">Your playtest code</label>
-          <input id="progressive-code" value={code} onChange={(event) => setCode(event.target.value)} maxLength={10} required autoComplete="off" />
-          <div className="ai-actions">
-            <button type="submit">Use my code</button>
-            <button type="button" onClick={() => setReturning(false)}>Cancel</button>
-          </div>
-        </form> : <>
-          <p className="ai-note">Play normally in Adaptive Pace. Join to link your Adaptive games under an anonymous code for model training. Keep the code for repeat visits. Guest and Fixed pace runs are not training examples; no name or email is collected.</p>
-          <div className="ai-actions"><button type="button" disabled={!ready} onClick={() => applyCode(createParticipantCode())}>Join and contribute</button>
-            <button type="button" disabled={!ready} onClick={() => setReturning(true)}>I have a code</button></div>
-        </>}
+      <section className="ai-code" aria-label="Adaptive Pace data">
+        <h3>Adaptive Pace play data</h3>
+        <p className="ai-note">When you start Adaptive Pace, you’ll be asked whether to share this game’s data for AI training. If you agree, use the same nickname as the leaderboard; completed runs save automatically. Sharing is optional. Fixed pace games are not collected.</p>
       </section>
       <p className="ai-note">{roundSeconds} seconds per cycle, including the preview.</p>
       <button type="button" className="display-start-button" onClick={start}
-        disabled={!ready || (policy === 'collect' && !participant) || (policy === 'adaptive' && database.available === null)
+        disabled={!ready
           || targetInput === 'esp32' && (!deviceConnected || !deviceHello?.adaptivePace || deviceState?.status !== STATUS.READY)}>Start challenge</button>
     </section>}
+    {!view && consentOpen && <div className="ai-consent-backdrop">
+      <section className="ai-consent-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-consent-title" aria-describedby="ai-consent-copy">
+        <h2 id="ai-consent-title">Help improve Adaptive Pace?</h2>
+        <p id="ai-consent-copy">If you agree, we’ll save your leaderboard nickname and this game’s score, target mode, pace, sequence lengths, clears or misses, play times, and timestamps in the AI Lab database. The data is used to train and evaluate Adaptive Pace. This game does not collect your email.</p>
+        <p className="ai-note">Use the same nickname as the public leaderboard so organizers can match records by name; the AI Lab does not verify leaderboard accounts. Sharing is optional. If you decline, you can still play and this run won’t be sent to the database or saved in the browser playtest archive.</p>
+        <form onSubmit={agreeAndStart}>
+          <label htmlFor="adaptive-consent-username">Leaderboard username</label>
+          <input id="adaptive-consent-username" value={consentName} onChange={(event) => setConsentName(event.target.value)} maxLength={24}
+            autoComplete="off" autoFocus placeholder="Enter the same username" />
+          {consentError && <p className="ai-consent-error" role="alert">{consentError}</p>}
+          <div className="ai-actions">
+            <button type="submit" className="ai-primary">I agree and start</button>
+            <button type="button" onClick={() => beginChallenge()}>Play without sharing</button>
+            <button type="button" onClick={() => { setConsentOpen(false); setConsentError(''); }}>Cancel</button>
+          </div>
+        </form>
+      </section>
+    </div>}
     {view && <section className="ai-panel ai-round" aria-label="Progressive game">
       <div className="ai-round-head">
         <div><p className="ai-eyebrow">Cycle {view.cycle} · {view.sequenceLength} flashes</p><h2>{phase(view)}</h2></div>
@@ -384,6 +407,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       </>}
       {ended && result && <>
         <p><strong>{cleared} {cleared === 1 ? 'cycle' : 'cycles'} cleared.</strong></p>
+        {!result.consentVersion && <p className="ai-note">This playthrough was not sent to the AI Lab or saved in the browser playtest archive.</p>}
         {view.review && <div className="progressive-review">
           <p><strong>Correct sequence</strong> {view.review.correct.join(' · ')}</p>
           <p><strong>Your hits</strong> {view.review.performed.length ? view.review.performed.join(' · ') : 'None recorded'}</p>
@@ -394,10 +418,10 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     </section>}
     {(!view || ended) && <section className="ai-panel ai-archive" aria-label="Progressive playtest database">
       <h3>Shared progressive playtest database</h3>
-      {summary && <p>Human coded playthroughs <strong>{summary.codedRuns ?? 0}</strong> · Previous synthetic rows awaiting cleanup <strong>{summary.syntheticRuns ?? 0}</strong> · Participant codes with Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
-      <p className="ai-note">Coded Adaptive runs from Browser and ESP32 share this pool. A participant who uses both modes counts once.</p>
-      {summary?.training === 'waiting-for-players' && <p>Model training needs five distinct participant codes with an Adaptive run reaching cycle 2, from Browser buttons or ESP32 mode.</p>}
-      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from the coded Adaptive players.</p>}
+      {summary && <p>Human coded playthroughs <strong>{summary.codedRuns ?? 0}</strong> · Previous synthetic rows awaiting cleanup <strong>{summary.syntheticRuns ?? 0}</strong> · Usernames with Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
+      <p className="ai-note">Consenting Adaptive runs from Browser and ESP32 share this pool. The leaderboard nickname groups repeat plays; names are not model features.</p>
+      {summary?.training === 'waiting-for-players' && <p>Model training needs five distinct consenting usernames with an Adaptive run reaching cycle 2, from Browser buttons or ESP32 mode.</p>}
+      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from the consenting Adaptive players.</p>}
       {database.available === false && <p>{targetInput === 'esp32'
         ? 'The ESP32 playtest table is not available yet. Run the updated Supabase schema. This run is kept in the browser backup and will retry later.'
         : 'The database is unavailable. Saved browser runs will retry when it reconnects.'}</p>}

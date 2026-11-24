@@ -63,6 +63,38 @@ grant select, insert on public.ai_progressive_runs, public.ai_progressive_models
 create table if not exists public.ai_progressive_esp32_runs (like public.ai_lab_runs including all);
 create table if not exists public.ai_progressive_esp32_models (like public.ai_lab_models including all);
 
+-- Progressive playtest participants use their leaderboard nickname after opting in.
+do $$
+declare
+  table_oid oid;
+  existing_check text;
+begin
+  foreach table_oid in array array[
+    'public.ai_progressive_runs'::regclass::oid,
+    'public.ai_progressive_esp32_runs'::regclass::oid
+  ] loop
+    for existing_check in
+      select conname from pg_constraint
+      where conrelid = table_oid and contype = 'c'
+        and pg_get_constraintdef(oid) like '%participant ~%'
+    loop
+      execute format('alter table %s drop constraint %I', table_oid::regclass, existing_check);
+    end loop;
+  end loop;
+end;
+$$;
+
+alter table public.ai_progressive_runs
+  drop constraint if exists ai_progressive_runs_participant_label_check;
+alter table public.ai_progressive_runs
+  add constraint ai_progressive_runs_participant_label_check
+  check (participant is null or char_length(btrim(participant)) between 1 and 24);
+alter table public.ai_progressive_esp32_runs
+  drop constraint if exists ai_progressive_esp32_runs_participant_label_check;
+alter table public.ai_progressive_esp32_runs
+  add constraint ai_progressive_esp32_runs_participant_label_check
+  check (participant is null or char_length(btrim(participant)) between 1 and 24);
+
 -- Keep the legacy source value recognizable so old synthetic rows can be safely filtered and removed.
 do $$
 declare
@@ -106,7 +138,7 @@ as $$
     where participant is not null and capture_source <> 'synthetic_seed'
       and not coalesce((run_data->>'synthetic')::boolean, false)
   ), eligible_players as (
-    select distinct participant
+    select distinct lower(participant) as participant
     from real_runs
     where policy = 'adaptive'
       and case when jsonb_typeof(run_data->'rounds') = 'array'
@@ -151,7 +183,7 @@ as $$
     where participant is not null and capture_source <> 'synthetic_seed'
       and not coalesce((run_data->>'synthetic')::boolean, false)
   ), eligible_players as (
-    select distinct participant from real_runs
+    select distinct lower(participant) as participant from real_runs
     where policy = 'adaptive' and case when jsonb_typeof(run_data->'rounds') = 'array'
       then jsonb_array_length(run_data->'rounds') > 1 else false end
   ), counts as (

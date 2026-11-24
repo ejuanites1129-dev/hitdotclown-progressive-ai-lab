@@ -56,6 +56,7 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
       const entry = profile.clean(run);
       if ((!entry || entry.input !== input && !profile.inputs?.includes(entry.input))
         || !['playthrough', 'browser_archive', 'sqlite_import'].includes(source)) return false;
+      if (profile.modelInput === 'combined' && (entry.policy !== 'adaptive' || !entry.participant)) return false;
       const runTable = profile.runTableFor?.(entry) ?? profile.runTable;
       if (!runTable) throw new Error('The playtest run table is not configured.');
       await rest(runTable + '?on_conflict=id', {

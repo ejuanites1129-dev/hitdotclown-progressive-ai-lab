@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { PARTICIPANT_CODE, predictCompletion } from '../src/systems/aiPractice.js';
-import { PROGRESSIVE_ARCHIVE, PROGRESSIVE_FEATURES, PROGRESSIVE_MODEL, PROGRESSIVE_RUN,
-  progressiveFeatures } from '../src/systems/progressivePractice.js';
+import { PROGRESSIVE_ARCHIVE, PROGRESSIVE_CONSENT_VERSION, PROGRESSIVE_FEATURES, PROGRESSIVE_MODEL, PROGRESSIVE_RUN,
+  participantGroupKey, progressiveFeatures } from '../src/systems/progressivePractice.js';
 import { validRoundSeconds } from '../src/systems/timerSettings.js';
 import { fitTree } from './train-ai-challenge.mjs';
 
@@ -12,11 +12,17 @@ const sources = ['Warm-up', 'Fixed medium pace', 'Randomized pace', 'Playtest-tr
 
 export function progressiveRunData(run, expectedInput = 'browser') {
   const acceptedInputs = Array.isArray(expectedInput) ? expectedInput : [expectedInput];
+  const isLegacyCode = typeof run?.participant === 'string' && PARTICIPANT_CODE.test(run.participant);
+  const hasCurrentConsent = run?.consentVersion === PROGRESSIVE_CONSENT_VERSION;
   if (run?.format !== PROGRESSIVE_RUN || typeof run.id !== 'string' || !uuid.test(run.id)
     || run.synthetic !== undefined
     || !acceptedInputs.includes(run.input) || !validRoundSeconds(run.roundSeconds)
     || !['adaptive', 'collect', 'fixed'].includes(run.policy)
-    || !(run.participant === null || typeof run.participant === 'string' && PARTICIPANT_CODE.test(run.participant))
+    || !(run.participant === null || typeof run.participant === 'string'
+      && run.participant === run.participant.normalize('NFKC').trim() && [...run.participant].length <= 24
+      && !/[\u0000-\u001f\u007f]/u.test(run.participant))
+    || run.participant !== null && !isLegacyCode && !hasCurrentConsent
+    || hasCurrentConsent && (!run.participant || run.policy !== 'adaptive')
     || run.policy === 'collect' && !run.participant || !integer(run.score, 0, Number.MAX_SAFE_INTEGER)
     || !Array.isArray(run.rounds) || !run.rounds.length) return null;
   let lives = 3;
@@ -42,6 +48,7 @@ export function progressiveRunData(run, expectedInput = 'browser') {
   return { format, input, policy, participant, id: id.toLowerCase(), roundSeconds, score, rounds,
     startedAt: date(run.startedAt), finishedAt: date(run.finishedAt),
     modelId: typeof run.modelId === 'string' && /^[a-f0-9]{64}$/.test(run.modelId) ? run.modelId : null,
+    ...(hasCurrentConsent ? { consentVersion: PROGRESSIVE_CONSENT_VERSION } : {}),
   };
 }
 
@@ -70,15 +77,15 @@ export function trainProgressive(runs, input = 'browser') {
   });
   const rows = progressiveExamples(sessions);
   const cohort = rows.filter(({ policy }) => policy === 'adaptive');
-  const players = [...new Set(cohort.map(({ participant }) => participant))].sort((a, b) => hash(a).localeCompare(hash(b)));
+  const players = [...new Set(cohort.map(({ participant }) => participantGroupKey(participant)))].sort((a, b) => hash(a).localeCompare(hash(b)));
   if (players.length < 5) return { training: 'waiting-for-players' };
   const heldOut = new Set(players.slice(0, Math.ceil(players.length / 5)));
-  const testing = cohort.filter(({ participant }) => heldOut.has(participant));
-  const trainingAdaptive = cohort.filter(({ participant }) => !heldOut.has(participant));
+  const testing = cohort.filter(({ participant }) => heldOut.has(participantGroupKey(participant)));
+  const trainingAdaptive = cohort.filter(({ participant }) => !heldOut.has(participantGroupKey(participant)));
   if (!trainingAdaptive.some(({ completed }) => completed) || trainingAdaptive.every(({ completed }) => completed)) {
     return { training: 'waiting-for-outcomes' };
   }
-  const training = rows.filter(({ participant, policy }) => !heldOut.has(participant) && policy === 'adaptive');
+  const training = rows.filter(({ participant, policy }) => !heldOut.has(participantGroupKey(participant)) && policy === 'adaptive');
   const tree = fitTree(training, 0, PROGRESSIVE_FEATURES);
   const lengthRates = new Map();
   for (const { features: { sequenceLength }, completed } of training) {
@@ -103,8 +110,8 @@ export function trainProgressive(runs, input = 'browser') {
   const [minRoundSeconds, maxRoundSeconds] = bounds(training, 'roundSeconds');
   const model = { format: PROGRESSIVE_MODEL, input, tree, coverage: { minSequenceLength, maxSequenceLength, minRoundSeconds, maxRoundSeconds } };
   const evaluation = {
-    trainingParticipants: new Set(training.map(({ participant }) => participant)).size,
-    trainingRealParticipants: new Set(training.map(({ participant }) => participant)).size,
+    trainingParticipants: new Set(training.map(({ participant }) => participantGroupKey(participant))).size,
+    trainingRealParticipants: new Set(training.map(({ participant }) => participantGroupKey(participant))).size,
     trainingSyntheticParticipants: 0,
     heldOutParticipants: heldOut.size, trainingRounds: training.length, heldOutRounds: testing.length,
     heldOutCleared: testing.filter(({ completed }) => completed).length,

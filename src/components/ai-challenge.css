@@ -59,7 +59,15 @@
 .ai-archive a { color: var(--display-accent); }
 .progressive-review { margin-bottom: 14px; overflow-wrap: anywhere; }
 .progressive-review strong { display: block; }
+.ai-consent-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgb(10 7 6 / 82%); }
+.ai-consent-dialog { width: min(100%, 540px); max-height: min(90vh, 700px); overflow: auto; padding: clamp(16px, 4vw, 26px); border: 1px solid var(--display-line); border-top: 4px solid #b83a28; border-radius: 8px; background: var(--display-panel); color: var(--display-text); box-shadow: 0 18px 60px rgb(0 0 0 / 45%); }
+.ai-consent-dialog h2 { color: var(--display-accent); }
+.ai-consent-dialog form { margin-top: 18px; }
+.ai-consent-dialog .ai-actions { margin-top: 18px; }
+.ai-consent-dialog .ai-actions button { min-height: 42px; }
+.ai-consent-error { color: #ffad91; font-weight: 700; }
 @media (max-width: 520px) {
   .ai-options { grid-template-columns: 1fr; }
   .ai-targets .ai-target { min-height: 56px; }
+  .ai-consent-dialog .ai-actions { align-items: stretch; flex-direction: column; }
 }
