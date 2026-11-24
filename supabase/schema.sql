@@ -122,26 +122,26 @@ stable
 security invoker
 set search_path = ''
 as $$
-  with counts as (
-    select count(*) as runs,
-      count(*) filter (where coalesce((run_data->>'synthetic')::boolean, false)) as synthetic_runs,
-      count(*) filter (where not coalesce((run_data->>'synthetic')::boolean, false)) as real_runs,
-      count(participant) filter (where not coalesce((run_data->>'synthetic')::boolean, false)) as coded_runs,
-      count(distinct participant) filter (where not coalesce((run_data->>'synthetic')::boolean, false)
-        and policy = 'collect' and jsonb_array_length(run_data->'rounds') > 1) as randomized_players
-    from public.ai_progressive_esp32_runs
-  )
   select jsonb_build_object(
-    'runs', runs,
-    'syntheticRuns', synthetic_runs,
-    'realRuns', real_runs,
-    'codedRuns', coded_runs,
-    'randomizedPlayers', randomized_players,
-    'sessions', case when coded_runs > p_known_coded_runs and randomized_players >= 5 then
-      (select jsonb_agg(run_data order by id) from public.ai_progressive_esp32_runs where participant is not null)
+    'runs', (select count(*) from public.ai_progressive_esp32_runs),
+    'syntheticRuns', (select count(*) from public.ai_progressive_esp32_runs
+      where coalesce((run_data->>'synthetic')::boolean, false)),
+    'realRuns', (select count(*) from public.ai_progressive_esp32_runs
+      where not coalesce((run_data->>'synthetic')::boolean, false)),
+    'codedRuns', (select count(participant) from public.ai_progressive_esp32_runs
+      where not coalesce((run_data->>'synthetic')::boolean, false)),
+    'randomizedPlayers', (select count(distinct participant) from public.ai_progressive_esp32_runs
+      where not coalesce((run_data->>'synthetic')::boolean, false)
+        and policy = 'collect' and jsonb_array_length(run_data->'rounds') > 1),
+    'sessions', case
+      when (select count(participant) from public.ai_progressive_esp32_runs
+        where not coalesce((run_data->>'synthetic')::boolean, false)) > p_known_coded_runs
+       and (select count(distinct participant) from public.ai_progressive_esp32_runs
+        where not coalesce((run_data->>'synthetic')::boolean, false)
+          and policy = 'collect' and jsonb_array_length(run_data->'rounds') > 1) >= 5
+      then (select jsonb_agg(run_data order by id) from public.ai_progressive_esp32_runs where participant is not null)
     end
-  )
-  from counts;
+  );
 $$;
 
 revoke all on function public.hitdotclown_progressive_esp32_snapshot(integer) from public, anon, authenticated;
