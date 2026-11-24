@@ -1,6 +1,6 @@
 {
   "format": "hit-dot-clown-progressive-tree-v1",
-  "input": "esp32",
+  "input": "combined",
   "tree": {
     "feature": "speed",
     "threshold": 1.5,
@@ -61,7 +61,7 @@
   },
   "synthetic": true,
   "provenance": "Deterministic simulated ESP32-style playthroughs. No humans, physical ESP32 signals, or live database records are included.",
-  "id": "0fc2b7d6fb78628132a4c801c3d7ecf996a28f1898f9affbdb19fb9497ef4ba5",
+  "id": "dfe401c58c0d8c76602dfd6f0ffdc257d0339f86deb438a08f212526cdb88762",
   "seed": 20261125,
   "trainingExamples": 689,
   "evaluation": {

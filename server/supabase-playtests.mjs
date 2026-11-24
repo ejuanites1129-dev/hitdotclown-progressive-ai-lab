@@ -6,7 +6,8 @@ function publicModel({ id, trained_at, model, evaluation }) {
 }
 
 export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, profile = fixedPlaytestProfile) {
-  const { runTable, modelTable, snapshot, archiveFormat } = profile;
+  const { modelTable, snapshot, archiveFormat } = profile;
+  const runTables = profile.runTables ?? [profile.runTable];
   const input = profile.input ?? 'browser';
   const key = env.AI_LAB_SUPABASE_SECRET_KEY;
   const url = new URL(env.AI_LAB_SUPABASE_URL ?? 'about:blank');
@@ -28,7 +29,9 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
   }
 
   async function latest() {
-    const rows = await rest(modelTable + '?order=coded_runs.desc,trained_at.desc,id.asc&limit=1');
+    const query = new URLSearchParams({ order: 'coded_runs.desc,trained_at.desc,id.asc', limit: '100' });
+    if (profile.modelInput) query.set('model->>input', 'eq.' + profile.modelInput);
+    const rows = await rest(modelTable + '?' + query);
     return rows[0] ?? null;
   }
 
@@ -50,7 +53,10 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
   return {
     async save(run, source) {
       const entry = profile.clean(run);
-      if (entry?.input !== input || !['playthrough', 'browser_archive', 'sqlite_import'].includes(source)) return false;
+      if ((!entry || entry.input !== input && !profile.inputs?.includes(entry.input))
+        || !['playthrough', 'browser_archive', 'sqlite_import'].includes(source)) return false;
+      const runTable = profile.runTableFor?.(entry) ?? profile.runTable;
+      if (!runTable) throw new Error('The playtest run table is not configured.');
       await rest(runTable + '?on_conflict=id', {
         body: { id: entry.id, participant: entry.participant, policy: entry.policy, capture_source: source, run_data: entry },
         headers: insertHeaders,
@@ -59,7 +65,7 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
     },
     async status() {
       let current = await latest();
-      const { runs, codedRuns, randomizedPlayers, sessions } = await rest('rpc/' + snapshot, {
+      const { runs, codedRuns, randomizedPlayers, syntheticRuns, sessions } = await rest('rpc/' + snapshot, {
         body: { p_known_coded_runs: current?.coded_runs ?? -1 },
       });
       let training = current ? 'trained' : 'waiting-for-players';
@@ -70,20 +76,23 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
           const id = profile.modelId(sessions, input);
           const { model, evaluation, cohort } = result;
           await rest(modelTable + '?on_conflict=id', {
-            body: { id, coded_runs: codedRuns, model, evaluation, cohort },
+            body: { id, coded_runs: runs, model, evaluation, cohort },
             headers: insertHeaders,
           });
           current = await latest();
         }
       }
-      return { [input]: { runs, codedRuns, randomizedPlayers, training, active: current ? publicModel(current) : null } };
+      const summary = { runs, codedRuns, randomizedPlayers, syntheticRuns: syntheticRuns ?? 0, training,
+        active: current ? publicModel(current) : null };
+      return input === 'combined' ? { browser: summary, esp32: summary } : { [input]: summary };
     },
     async dataset() {
       const models = await pageAll(modelTable);
-      const runs = await pageAll(runTable);
+      const runs = (await Promise.all(runTables.filter(Boolean).map(pageAll))).flat().sort((a, b) => a.id.localeCompare(b.id));
       return { format: archiveFormat, datasetSource: 'Hit Dot Clown AI Lab Supabase', exportedAt: new Date().toISOString(),
         sessions: runs.map(({ run_data, capture_source, saved_at }) => ({ ...run_data, captureSource: capture_source, savedAt: saved_at })),
-        models: models.map(({ cohort, ...row }) => ({ ...publicModel(row), ...cohort })),
+        models: models.filter(({ model }) => !profile.modelInput || model.input === profile.modelInput)
+          .map(({ cohort, ...row }) => ({ ...publicModel(row), ...cohort })),
       };
     },
   };

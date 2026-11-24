@@ -7,15 +7,15 @@ export const PROGRESSIVE_RUN = 'hit-dot-clown-progressive-run-v1';
 export const PROGRESSIVE_ARCHIVE = 'hit-dot-clown-progressive-archive-v1';
 export const PROGRESSIVE_MODEL = 'hit-dot-clown-progressive-tree-v1';
 export const PROGRESSIVE_FEATURES = Object.freeze([
-  'sequenceLength', 'speed', 'livesAtStart', 'previousSpeed', 'previousMisses', 'previousMsPerHit', 'roundSeconds',
+  'sequenceLength', 'speed', 'inputMode', 'livesAtStart', 'previousSpeed', 'previousMisses', 'previousMsPerHit', 'roundSeconds',
 ]);
 const storagePrefix = 'hit-dot-clown-progressive-playtest:';
 export const readProgressiveArchive = (storage) => readArchivedRuns(storage, storagePrefix, PROGRESSIVE_ARCHIVE,
   (run) => run?.format === PROGRESSIVE_RUN && Array.isArray(run.rounds) && run.rounds.length > 0);
 export const saveProgressiveRun = (storage, run) => saveArchivedRun(storage, storagePrefix, run);
 
-export function progressiveFeatures(previous, { sequenceLength, speed, livesAtStart, roundSeconds }) {
-  return { sequenceLength, speed, livesAtStart, roundSeconds,
+export function progressiveFeatures(previous, { sequenceLength, speed, input = 'browser', livesAtStart, roundSeconds }) {
+  return { sequenceLength, speed, inputMode: input === 'esp32' ? 1 : 0, livesAtStart, roundSeconds,
     previousSpeed: previous.speed, previousMisses: previous.misses,
     previousMsPerHit: Math.round(previous.playMs / Math.max(1, previous.correctHits) / 250) * 250,
   };
@@ -33,10 +33,11 @@ export function chooseProgressivePace({ previous, sequenceLength, livesAtStart, 
   const nearby = available.filter((speed) => Math.abs(speed - previous.speed) <= 1);
   const choices = nearby.length ? nearby : available;
   const coverage = model?.coverage;
-  if (model?.format === PROGRESSIVE_MODEL && model.input === input && sequenceLength >= coverage?.minSequenceLength
+  if (model?.format === PROGRESSIVE_MODEL && (model.input === input || model.input === 'combined' && ['browser', 'esp32'].includes(input))
+    && sequenceLength >= coverage?.minSequenceLength
     && sequenceLength <= coverage?.maxSequenceLength && roundSeconds >= coverage?.minRoundSeconds && roundSeconds <= coverage?.maxRoundSeconds) {
     const [best] = choices.map((speed) => ({
-      speed, probability: predictCompletion(model.tree, progressiveFeatures(previous, { sequenceLength, speed, livesAtStart, roundSeconds })),
+      speed, probability: predictCompletion(model.tree, progressiveFeatures(previous, { sequenceLength, speed, input, livesAtStart, roundSeconds })),
     })).sort((a, b) => Math.abs(a.probability - 0.7) - Math.abs(b.probability - 0.7)
       || Math.abs(a.speed - previous.speed) - Math.abs(b.speed - previous.speed));
     const source = model.provenance === 'synthetic-seeded' ? 'Synthetic-seeded playtest model'
@@ -66,7 +67,7 @@ export class ProgressiveGame extends DemoGame {
   beginMemory(now, timerStartedAt = now) {
     const { sequenceLength, lives } = this.state;
     const pace = chooseProgressivePace({ previous: this.rounds.at(-1), sequenceLength, livesAtStart: lives,
-      roundSeconds: this.roundSeconds, policy: this.policy, model: this.model, random: this.paceRandom });
+      roundSeconds: this.roundSeconds, policy: this.policy, model: this.model, random: this.paceRandom, input: 'browser' });
     this.lightSeconds = SPEEDS[pace.speed].ms / 1000;
     this.current = { sequenceLength, livesAtStart: lives, turnStarted: null, ...pace };
     super.beginMemory(now, timerStartedAt);

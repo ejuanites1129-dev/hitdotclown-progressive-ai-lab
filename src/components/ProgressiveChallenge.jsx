@@ -6,7 +6,6 @@ import { STATUS } from '../systems/gameLogic.js';
 import { chooseProgressivePace, ProgressiveGame, PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
 import { DEFAULT_ROUND_SECONDS } from '../systems/timerSettings.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
-import demo from '../systems/models/progressive-synthetic-demo.json';
 import esp32Demo from '../systems/models/progressive-esp32-synthetic-demo.json';
 import { exportDatabaseDataset, usePlaytestDatabase } from './usePlaytestDatabase.js';
 import './ai-challenge.css';
@@ -71,7 +70,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const saveToDatabase = database.save;
   const active = database.status?.[targetInput]?.active;
   const summary = database.status?.[targetInput];
-  const model = active?.model ?? (targetInput === 'browser' ? demo : esp32Demo);
+  const model = active?.model ?? esp32Demo;
   const ended = view?.status === STATUS.OVER || view?.status === STATUS.VICTORY;
   const playing = Boolean(view && !ended);
 
@@ -276,7 +275,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (targetInput === 'esp32') { void startHardware(); return; }
     const engine = new ProgressiveGame({ policy, model: policy === 'adaptive' ? model : null, roundSeconds });
     const run = { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'browser', participant, policy, roundSeconds,
-      modelId: policy === 'adaptive' ? active?.id ?? demo.id : null, startedAt: new Date().toISOString() };
+      modelId: policy === 'adaptive' ? active?.id ?? esp32Demo.id : null, startedAt: new Date().toISOString() };
     running.current = { engine, run };
     setResult(null);
     setNotice('');
@@ -339,13 +338,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         {deviceMessage && <p className="ai-note" role="status">{deviceMessage}</p>}
         {deviceState && <p className="ai-note">Board status: {deviceState.status} · {deviceState.sequenceLength} lights · {deviceState.lives} lives</p>}
       </section>}
-      {policy === 'adaptive' && <p className="ai-note">{targetInput === 'esp32'
-        ? active ? active.model?.provenance === 'synthetic-seeded'
-          ? `Decision tree uses synthetic seed examples and real ESP32 playtests; evaluation uses held-out real players. Model ${active.id.slice(0, 8)}.`
-          : `Decision tree trained on ESP32 playthroughs. Model ${active.id.slice(0, 8)}.`
-          : 'Simulated-data model active for ESP32 practice. Real playtests remain separate and will replace it when a validated model is available.'
-        : active ? `Decision tree trained on browser playthroughs. Model ${active.id.slice(0, 8)}.`
-          : 'Simulated-data model loaded. Adaptive pace uses sequence length and previous round performance.'}</p>}
+      {policy === 'adaptive' && <p className="ai-note">{active
+        ? active.model?.provenance === 'synthetic-seeded'
+          ? `Shared decision tree uses synthetic seed examples and real browser/ESP32 playtests; evaluation uses held-out real players. Model ${active.id.slice(0, 8)}.`
+          : `Shared decision tree trained on browser and ESP32 playtests. Model ${active.id.slice(0, 8)}.`
+        : targetInput === 'esp32'
+          ? 'Simulated-data model active for ESP32 practice. Coded randomized runs from browser and ESP32 will feed the shared model.'
+          : 'Simulated-data model loaded. Coded randomized browser and ESP32 playtests feed one shared training pool.'}</p>}
       <section className="ai-code" aria-label="Class playtest">
         <h3>Class playtest</h3>
         {participant ? <div className="ai-actions">
@@ -400,10 +399,11 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       </>}
     </section>}
     {(!view || ended) && <section className="ai-panel ai-archive" aria-label="Progressive playtest database">
-      <h3>Progressive playtest database</h3>
+      <h3>Shared progressive playtest database</h3>
       {summary && <p>Saved runs <strong>{summary.runs}</strong> · Synthetic seed runs <strong>{summary.syntheticRuns ?? 0}</strong> · Real randomized players with two or more cycles <strong>{summary.randomizedPlayers}</strong></p>}
-      {summary?.training === 'waiting-for-players' && <p>Training needs five coded randomized players who reached cycle 2.</p>}
-      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both clears and failures from the assigned players.</p>}
+      <p className="ai-note">Browser and ESP32 runs share this pool. A participant who uses both modes counts once.</p>
+      {summary?.training === 'waiting-for-players' && <p>Training needs five coded randomized players who reached cycle 2 in either Browser buttons or ESP32 mode.</p>}
+      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both clears and failures from the real assigned players across the shared pool.</p>}
       {database.available === false && <p>{targetInput === 'esp32'
         ? 'The ESP32 playtest table is not available yet. Run the updated Supabase schema. This run is kept in the browser backup and will retry later.'
         : 'The database is unavailable. Saved browser runs will retry when it reconnects.'}</p>}

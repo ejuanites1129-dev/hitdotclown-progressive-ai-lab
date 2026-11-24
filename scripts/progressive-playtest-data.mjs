@@ -11,9 +11,10 @@ const integer = (value, min, max) => Number.isInteger(value) && value >= min && 
 const sources = ['Warm-up', 'Fixed medium pace', 'Randomized pace', 'Playtest-trained model', 'Simulated-data model', 'Rule-based pace'];
 
 export function progressiveRunData(run, synthetic = false, expectedInput = 'browser') {
+  const acceptedInputs = Array.isArray(expectedInput) ? expectedInput : [expectedInput];
   if (run?.format !== PROGRESSIVE_RUN || typeof run.id !== 'string' || !uuid.test(run.id)
     || (synthetic ? run.synthetic !== true : run.synthetic !== undefined)
-    || run.input !== expectedInput || !validRoundSeconds(run.roundSeconds)
+    || !acceptedInputs.includes(run.input) || !validRoundSeconds(run.roundSeconds)
     || !['adaptive', 'collect', 'fixed'].includes(run.policy)
     || !(run.participant === null || typeof run.participant === 'string' && PARTICIPANT_CODE.test(run.participant))
     || run.policy === 'collect' && !run.participant || !integer(run.score, 0, Number.MAX_SAFE_INTEGER)
@@ -47,9 +48,9 @@ export function progressiveRunData(run, synthetic = false, expectedInput = 'brow
 
 export function progressiveExamples(sessions) {
   return sessions.flatMap((run) => run.participant === null ? [] : run.rounds.slice(1).map((round, index) => ({
-    runId: run.id, participant: run.participant, policy: run.policy, completed: round.completed,
+    runId: run.id, participant: run.participant, policy: run.policy, input: run.input, completed: round.completed,
     synthetic: run.synthetic === true,
-    features: progressiveFeatures(run.rounds[index], { ...round, roundSeconds: run.roundSeconds }),
+    features: progressiveFeatures(run.rounds[index], { ...round, input: run.input, roundSeconds: run.roundSeconds }),
   })));
 }
 
@@ -64,9 +65,10 @@ const bounds = (rows, feature) => {
 
 export function trainProgressive(runs, synthetic = false, input = 'browser') {
   const allowMixed = synthetic === 'mixed';
+  const acceptedInputs = input === 'combined' ? ['browser', 'esp32'] : [input];
   const sessions = runs.map((run) => {
     const isSynthetic = allowMixed ? run?.synthetic === true : synthetic;
-    const cleaned = progressiveRunData(run, isSynthetic, input);
+    const cleaned = progressiveRunData(run, isSynthetic, acceptedInputs);
     if (!cleaned) throw new Error('Invalid or mixed-provenance progressive playthrough.');
     return cleaned;
   });
@@ -133,22 +135,24 @@ export function trainProgressive(runs, synthetic = false, input = 'browser') {
 }
 
 function createProgressiveProfile(input) {
-  const suffix = input === 'esp32' ? '_esp32' : '';
+  const combined = input === 'combined';
   return {
   input,
   archiveFormat: PROGRESSIVE_ARCHIVE,
-  clean: (run, synthetic = false) => progressiveRunData(run, synthetic, input),
+  clean: (run, synthetic = false) => progressiveRunData(run, synthetic, combined ? ['browser', 'esp32'] : input),
   modelId: (runs) => progressiveModelId(runs, input),
-  train: (runs) => trainProgressive(runs, input === 'esp32' ? 'mixed' : false, input),
+  train: (runs) => trainProgressive(runs, combined ? 'mixed' : false, input),
   localRuns: 'progressive_runs',
   localModels: 'progressive_models',
-  inputs: [input],
+  inputs: combined ? ['browser', 'esp32'] : [input],
   requireSecondCycle: true,
-  runTable: 'ai_progressive' + suffix + '_runs',
-  modelTable: 'ai_progressive' + suffix + '_models',
-  snapshot: 'hitdotclown_progressive' + suffix + '_snapshot',
+  runTables: combined ? ['ai_progressive_runs', 'ai_progressive_esp32_runs'] : [`ai_progressive${input === 'esp32' ? '_esp32' : ''}_runs`],
+  runTableFor: combined ? (run) => run.input === 'esp32' ? 'ai_progressive_esp32_runs' : 'ai_progressive_runs' : null,
+  modelTable: 'ai_progressive_models',
+  modelInput: input,
+  snapshot: 'hitdotclown_progressive_snapshot',
   };
 }
 
-export const progressiveProfile = createProgressiveProfile('browser');
-export const progressiveEsp32Profile = createProgressiveProfile('esp32');
+export const progressiveProfile = createProgressiveProfile('combined');
+export const progressiveEsp32Profile = progressiveProfile;

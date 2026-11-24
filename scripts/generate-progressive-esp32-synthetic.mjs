@@ -129,11 +129,11 @@ function csvCell(value) {
 async function main() {
   const random = seededRandom(seed);
   const sessions = Array.from({ length: participantCount }, (_, index) => generateRun(index + 1, random));
-  const trained = trainProgressive(sessions, true, 'esp32');
+  const trained = trainProgressive(sessions, true, 'combined');
   if (trained.training !== 'trained') throw new Error(`Synthetic training did not complete: ${trained.training}`);
 
   const examples = progressiveExamples(sessions);
-  const model = { ...trained.model, id: progressiveModelId(sessions, 'esp32'), seed,
+  const model = { ...trained.model, id: progressiveModelId(sessions, 'combined'), seed,
     provenance, trainingExamples: examples.length,
     evaluation: trained.evaluation };
   const dataset = { format: PROGRESSIVE_ARCHIVE, synthetic: true, seed, input: 'esp32', policy: 'collect',
@@ -155,15 +155,15 @@ async function main() {
       trainingExamples: examples.length, evaluation: trained.evaluation },
     sessions };
 
-  const rows = [['synthetic', 'participant', 'session_id', 'cycle', 'sequence_length', 'speed_index', 'speed_label',
+  const rows = [['synthetic', 'participant', 'session_id', 'cycle', 'sequence_length', 'speed_index', 'speed_label', 'input_mode',
     'lives_at_start', 'previous_speed', 'previous_misses', 'previous_ms_per_hit', 'round_seconds',
     'correct_hits', 'misses', 'play_ms', 'completed', 'outcome']];
   for (const session of sessions) {
     for (let index = 1; index < session.rounds.length; index++) {
       const round = session.rounds[index];
-      const features = progressiveFeatures(session.rounds[index - 1], { ...round, roundSeconds });
+      const features = progressiveFeatures(session.rounds[index - 1], { ...round, input: session.input, roundSeconds });
       rows.push([true, session.participant, session.id, index + 1, features.sequenceLength, features.speed,
-        SPEEDS[features.speed].label, features.livesAtStart, features.previousSpeed, features.previousMisses,
+        SPEEDS[features.speed].label, features.inputMode, features.livesAtStart, features.previousSpeed, features.previousMisses,
         features.previousMsPerHit, features.roundSeconds, round.correctHits, round.misses, round.playMs,
         round.completed, round.outcome]);
     }
