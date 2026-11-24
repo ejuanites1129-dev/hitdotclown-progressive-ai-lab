@@ -312,7 +312,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   return <section className="ai-carnival progressive-carnival" aria-label="Progressive AI Carnival Challenge">
     {!view && <section className="ai-panel" aria-label="Challenge setup">
       <div className="ai-intro">
-        <span className="ai-pill">Unranked browser game</span>
+        <span className="ai-pill">{targetInput === 'esp32' ? 'Unranked physical game' : 'Unranked browser game'}</span>
         <p>Start with three flashes. Every clear adds one step. Your score and three lives carry across cycles.</p>
       </div>
       <label htmlFor="progressive-pace">Round settings</label>
