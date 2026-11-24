@@ -63,7 +63,7 @@ grant select, insert on public.ai_progressive_runs, public.ai_progressive_models
 create table if not exists public.ai_progressive_esp32_runs (like public.ai_lab_runs including all);
 create table if not exists public.ai_progressive_esp32_models (like public.ai_lab_models including all);
 
--- Add a source label for the synthetic seed rows without creating another run table.
+-- Keep the legacy source value recognizable so old synthetic rows can be safely filtered and removed.
 do $$
 declare
   existing_check text;
@@ -87,7 +87,7 @@ alter table public.ai_progressive_esp32_models enable row level security;
 revoke all on public.ai_progressive_esp32_runs, public.ai_progressive_esp32_models from public, anon, authenticated, service_role;
 grant select, insert on public.ai_progressive_esp32_runs, public.ai_progressive_esp32_models to service_role;
 
--- Both input modes share the same progressive training pool and participant count.
+-- Both input modes share one human-only progressive training pool.
 create or replace function public.hitdotclown_progressive_snapshot(p_known_coded_runs integer)
 returns jsonb
 language sql
@@ -95,53 +95,44 @@ stable
 security invoker
 set search_path = ''
 as $$
+  with real_runs as (
+    select id, participant, policy, run_data
+    from public.ai_progressive_runs
+    where participant is not null
+      and not coalesce((run_data->>'synthetic')::boolean, false)
+    union all
+    select id, participant, policy, run_data
+    from public.ai_progressive_esp32_runs
+    where participant is not null and capture_source <> 'synthetic_seed'
+      and not coalesce((run_data->>'synthetic')::boolean, false)
+  ), eligible_players as (
+    select distinct participant
+    from real_runs
+    where policy = 'adaptive'
+      and case when jsonb_typeof(run_data->'rounds') = 'array'
+        then jsonb_array_length(run_data->'rounds') > 1 else false end
+  ), counts as (
+    select
+      (select count(*) from real_runs) as real_runs,
+      (select count(participant) from real_runs) as coded_runs,
+      (select count(*) from eligible_players) as adaptive_players,
+      (select count(*) from public.ai_progressive_runs
+        where coalesce((run_data->>'synthetic')::boolean, false))
+        + (select count(*) from public.ai_progressive_esp32_runs
+          where capture_source = 'synthetic_seed' or coalesce((run_data->>'synthetic')::boolean, false)) as synthetic_runs
+  )
   select jsonb_build_object(
-    'runs', (select count(*) from public.ai_progressive_runs)
-      + (select count(*) from public.ai_progressive_esp32_runs),
-    'syntheticRuns', (select count(*) from public.ai_progressive_runs
-      where coalesce((run_data->>'synthetic')::boolean, false))
-      + (select count(*) from public.ai_progressive_esp32_runs
-        where capture_source = 'synthetic_seed' or coalesce((run_data->>'synthetic')::boolean, false)),
-    'realRuns', (select count(*) from public.ai_progressive_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false))
-      + (select count(*) from public.ai_progressive_esp32_runs
-        where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false)),
-    'codedRuns', (select count(participant) from public.ai_progressive_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false))
-      + (select count(participant) from public.ai_progressive_esp32_runs
-        where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false)),
-    'adaptivePlayers', (select count(distinct participants.participant) from (
-      select participant from public.ai_progressive_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
-        and jsonb_array_length(run_data->'rounds') > 1
-      union
-      select participant from public.ai_progressive_esp32_runs
-      where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
-        and jsonb_array_length(run_data->'rounds') > 1
-    ) as participants),
+    'runs', real_runs,
+    'codedRuns', coded_runs,
+    'syntheticRuns', synthetic_runs,
+    'realRuns', real_runs,
+    'adaptivePlayers', adaptive_players,
     'sessions', case
-      when ((select count(*) from public.ai_progressive_runs)
-        + (select count(*) from public.ai_progressive_esp32_runs)) > p_known_coded_runs
-       and (select count(distinct participants.participant) from (
-          select participant from public.ai_progressive_runs
-          where not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
-            and jsonb_array_length(run_data->'rounds') > 1
-          union
-          select participant from public.ai_progressive_esp32_runs
-          where capture_source <> 'synthetic_seed' and not coalesce((run_data->>'synthetic')::boolean, false) and policy = 'adaptive'
-            and jsonb_array_length(run_data->'rounds') > 1
-        ) as participants) >= 5
-      then (select jsonb_agg(all_runs.run_data order by all_runs.id) from (
-        select id, case when capture_source = 'synthetic_seed'
-          then jsonb_set(run_data, '{synthetic}', 'true'::jsonb, true) else run_data end as run_data
-        from public.ai_progressive_runs where participant is not null
-        union all
-        select id, case when capture_source = 'synthetic_seed'
-          then jsonb_set(run_data, '{synthetic}', 'true'::jsonb, true) else run_data end as run_data
-        from public.ai_progressive_esp32_runs where participant is not null
-      ) as all_runs)
+      when coded_runs > p_known_coded_runs and adaptive_players >= 5
+      then (select jsonb_agg(run_data order by id) from real_runs)
     end
-  );
+  )
+  from counts;
 $$;
 
 revoke all on function public.hitdotclown_progressive_snapshot(integer) from public, anon, authenticated;
@@ -154,26 +145,29 @@ stable
 security invoker
 set search_path = ''
 as $$
+  with real_runs as (
+    select id, participant, policy, run_data
+    from public.ai_progressive_esp32_runs
+    where participant is not null and capture_source <> 'synthetic_seed'
+      and not coalesce((run_data->>'synthetic')::boolean, false)
+  ), eligible_players as (
+    select distinct participant from real_runs
+    where policy = 'adaptive' and case when jsonb_typeof(run_data->'rounds') = 'array'
+      then jsonb_array_length(run_data->'rounds') > 1 else false end
+  ), counts as (
+    select (select count(*) from real_runs) as real_runs,
+      (select count(participant) from real_runs) as coded_runs,
+      (select count(*) from eligible_players) as adaptive_players,
+      (select count(*) from public.ai_progressive_esp32_runs
+        where capture_source = 'synthetic_seed' or coalesce((run_data->>'synthetic')::boolean, false)) as synthetic_runs
+  )
   select jsonb_build_object(
-    'runs', (select count(*) from public.ai_progressive_esp32_runs),
-    'syntheticRuns', (select count(*) from public.ai_progressive_esp32_runs
-      where coalesce((run_data->>'synthetic')::boolean, false)),
-    'realRuns', (select count(*) from public.ai_progressive_esp32_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false)),
-    'codedRuns', (select count(participant) from public.ai_progressive_esp32_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false)),
-    'adaptivePlayers', (select count(distinct participant) from public.ai_progressive_esp32_runs
-      where not coalesce((run_data->>'synthetic')::boolean, false)
-        and policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1),
-    'sessions', case
-      when (select count(participant) from public.ai_progressive_esp32_runs
-        where not coalesce((run_data->>'synthetic')::boolean, false)) > p_known_coded_runs
-       and (select count(distinct participant) from public.ai_progressive_esp32_runs
-        where not coalesce((run_data->>'synthetic')::boolean, false)
-          and policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1) >= 5
-      then (select jsonb_agg(run_data order by id) from public.ai_progressive_esp32_runs where participant is not null)
-    end
-  );
+    'runs', real_runs, 'realRuns', real_runs, 'codedRuns', coded_runs,
+    'syntheticRuns', synthetic_runs, 'adaptivePlayers', adaptive_players,
+    'sessions', case when coded_runs > p_known_coded_runs and adaptive_players >= 5
+      then (select jsonb_agg(run_data order by id) from real_runs) end
+  )
+  from counts;
 $$;
 
 revoke all on function public.hitdotclown_progressive_esp32_snapshot(integer) from public, anon, authenticated;

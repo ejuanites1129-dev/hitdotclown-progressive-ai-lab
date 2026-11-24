@@ -32,7 +32,8 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
     const query = new URLSearchParams({ order: 'coded_runs.desc,trained_at.desc,id.asc', limit: '100' });
     if (profile.modelInput) query.set('model->>input', 'eq.' + profile.modelInput);
     const rows = await rest(modelTable + '?' + query);
-    return rows[0] ?? null;
+    return rows.find(({ model }) => model?.synthetic !== true
+      && !['simulated', 'synthetic-seeded'].includes(model?.provenance)) ?? null;
   }
 
   async function pageAll(table) {
@@ -79,7 +80,7 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
           const id = profile.modelId(sessions, input);
           const { model, evaluation, cohort } = result;
           await rest(modelTable + '?on_conflict=id', {
-            body: { id, coded_runs: runs, model, evaluation, cohort },
+            body: { id, coded_runs: codedRuns, model, evaluation, cohort },
             headers: insertHeaders,
           });
           current = await latest();
@@ -94,8 +95,10 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
       const models = await pageAll(modelTable);
       const runs = (await Promise.all(runTables.filter(Boolean).map(pageAll))).flat().sort((a, b) => a.id.localeCompare(b.id));
       return { format: archiveFormat, datasetSource: 'Hit Dot Clown AI Lab Supabase', exportedAt: new Date().toISOString(),
-        sessions: runs.map(({ run_data, capture_source, saved_at }) => ({ ...run_data, captureSource: capture_source, savedAt: saved_at })),
-        models: models.filter(({ model }) => !profile.modelInput || model.input === profile.modelInput)
+        sessions: runs.filter(({ run_data, capture_source }) => capture_source !== 'synthetic_seed' && run_data?.synthetic !== true)
+          .map(({ run_data, capture_source, saved_at }) => ({ ...run_data, captureSource: capture_source, savedAt: saved_at })),
+        models: models.filter(({ model }) => (!profile.modelInput || model.input === profile.modelInput)
+          && model?.synthetic !== true && !['simulated', 'synthetic-seeded'].includes(model?.provenance))
           .map(({ cohort, ...row }) => ({ ...publicModel(row), ...cohort })),
       };
     },

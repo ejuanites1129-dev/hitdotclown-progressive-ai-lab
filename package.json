@@ -6,7 +6,6 @@
   "engines": { "node": "24.x" },
   "scripts": {
     "build": "vite build",
-    "generate:synthetic-esp32": "node scripts/generate-progressive-esp32-synthetic.mjs",
     "export:dataset": "node --env-file=.env.local scripts/dataset.mjs export",
     "import:sqlite": "node --env-file=.env.local scripts/dataset.mjs import-sqlite"
   },

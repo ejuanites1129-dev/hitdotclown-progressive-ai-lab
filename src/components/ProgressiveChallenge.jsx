@@ -6,7 +6,6 @@ import { STATUS } from '../systems/gameLogic.js';
 import { chooseProgressivePace, ProgressiveGame, PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
 import { DEFAULT_ROUND_SECONDS } from '../systems/timerSettings.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
-import esp32Demo from '../systems/models/progressive-esp32-synthetic-demo.json';
 import { exportDatabaseDataset, usePlaytestDatabase } from './usePlaytestDatabase.js';
 import './ai-challenge.css';
 
@@ -70,7 +69,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const saveToDatabase = database.save;
   const active = database.status?.[targetInput]?.active;
   const summary = database.status?.[targetInput];
-  const model = active?.model ?? esp32Demo;
+  const model = active?.model ?? null;
   const ended = view?.status === STATUS.OVER || view?.status === STATUS.VICTORY;
   const playing = Boolean(view && !ended);
 
@@ -246,13 +245,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (policy === 'collect' && !participant) return;
     const tracker = {
       policy,
-      model: policy === 'adaptive' ? active?.model ?? esp32Demo : null,
+      model: policy === 'adaptive' ? active?.model ?? null : null,
       speed: 1,
       source: 'Warm-up',
       probability: undefined,
       currentCycle: null,
       run: { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'esp32', participant, policy, roundSeconds,
-        modelId: policy === 'adaptive' ? active?.id ?? esp32Demo.id : null, startedAt: new Date().toISOString(), score: 0, rounds: [] },
+        modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(), score: 0, rounds: [] },
     };
     hardwareRun.current = tracker;
     activeTarget.current = null;
@@ -275,7 +274,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (targetInput === 'esp32') { void startHardware(); return; }
     const engine = new ProgressiveGame({ policy, model: policy === 'adaptive' ? model : null, roundSeconds });
     const run = { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'browser', participant, policy, roundSeconds,
-      modelId: policy === 'adaptive' ? active?.id ?? esp32Demo.id : null, startedAt: new Date().toISOString() };
+      modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString() };
     running.current = { engine, run };
     setResult(null);
     setNotice('');
@@ -338,12 +337,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         {deviceState && <p className="ai-note">Board status: {deviceState.status} · {deviceState.sequenceLength} lights · {deviceState.lives} lives</p>}
       </section>}
       {policy === 'adaptive' && <p className="ai-note">{active
-        ? active.model?.provenance === 'synthetic-seeded'
-          ? `Shared decision tree uses simulated seed examples plus saved coded playthroughs. Model ${active.id.slice(0, 8)}.`
-          : `Shared decision tree is active for Adaptive Pace on browser and ESP32. Model ${active.id.slice(0, 8)}.`
-        : targetInput === 'esp32'
-          ? 'Simulated-data model active for ESP32 practice. Coded Adaptive Pace playthroughs from browser and ESP32 feed the shared model.'
-          : 'Simulated-data model loaded. Coded Adaptive Pace playthroughs from browser and ESP32 feed one shared training pool.'}</p>}
+        ? `Human-playtest decision tree active for Adaptive Pace on browser and ESP32. Model ${active.id.slice(0, 8)}.`
+        : 'No human-trained model yet. Adaptive Pace uses the rule-based fallback while coded human playthroughs are collected.'}</p>}
       <section className="ai-code" aria-label="Class playtest">
         <h3>Class playtest</h3>
         {participant ? <div className="ai-actions">
@@ -399,7 +394,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     </section>}
     {(!view || ended) && <section className="ai-panel ai-archive" aria-label="Progressive playtest database">
       <h3>Shared progressive playtest database</h3>
-      {summary && <p>Saved runs <strong>{summary.runs}</strong> · Synthetic seed runs <strong>{summary.syntheticRuns ?? 0}</strong> · Participant codes with Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
+      {summary && <p>Human coded playthroughs <strong>{summary.codedRuns ?? 0}</strong> · Previous synthetic rows awaiting cleanup <strong>{summary.syntheticRuns ?? 0}</strong> · Participant codes with Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
       <p className="ai-note">Coded Adaptive runs from Browser and ESP32 share this pool. A participant who uses both modes counts once.</p>
       {summary?.training === 'waiting-for-players' && <p>Model training needs five distinct participant codes with an Adaptive run reaching cycle 2, from Browser buttons or ESP32 mode.</p>}
       {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from the coded Adaptive players.</p>}

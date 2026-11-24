@@ -8,12 +8,12 @@ import { fitTree } from './train-ai-challenge.mjs';
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const integer = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
-const sources = ['Warm-up', 'Fixed medium pace', 'Randomized pace', 'Playtest-trained model', 'Simulated-data model', 'Rule-based pace'];
+const sources = ['Warm-up', 'Fixed medium pace', 'Randomized pace', 'Playtest-trained model', 'Human playtest-trained model', 'Rule-based pace'];
 
-export function progressiveRunData(run, synthetic = false, expectedInput = 'browser') {
+export function progressiveRunData(run, expectedInput = 'browser') {
   const acceptedInputs = Array.isArray(expectedInput) ? expectedInput : [expectedInput];
   if (run?.format !== PROGRESSIVE_RUN || typeof run.id !== 'string' || !uuid.test(run.id)
-    || (synthetic ? run.synthetic !== true : run.synthetic !== undefined)
+    || run.synthetic !== undefined
     || !acceptedInputs.includes(run.input) || !validRoundSeconds(run.roundSeconds)
     || !['adaptive', 'collect', 'fixed'].includes(run.policy)
     || !(run.participant === null || typeof run.participant === 'string' && PARTICIPANT_CODE.test(run.participant))
@@ -42,14 +42,12 @@ export function progressiveRunData(run, synthetic = false, expectedInput = 'brow
   return { format, input, policy, participant, id: id.toLowerCase(), roundSeconds, score, rounds,
     startedAt: date(run.startedAt), finishedAt: date(run.finishedAt),
     modelId: typeof run.modelId === 'string' && /^[a-f0-9]{64}$/.test(run.modelId) ? run.modelId : null,
-    ...(synthetic ? { synthetic: true } : {}),
   };
 }
 
 export function progressiveExamples(sessions) {
   return sessions.flatMap((run) => run.participant === null ? [] : run.rounds.slice(1).map((round, index) => ({
     runId: run.id, participant: run.participant, policy: run.policy, input: run.input, completed: round.completed,
-    synthetic: run.synthetic === true,
     features: progressiveFeatures(run.rounds[index], { ...round, input: run.input, roundSeconds: run.roundSeconds }),
   })));
 }
@@ -63,35 +61,24 @@ const bounds = (rows, feature) => {
   return [Math.min(...values), Math.max(...values)];
 };
 
-export function trainProgressive(runs, synthetic = false, input = 'browser') {
-  const allowMixed = synthetic === 'mixed';
+export function trainProgressive(runs, input = 'browser') {
   const acceptedInputs = input === 'combined' ? ['browser', 'esp32'] : [input];
   const sessions = runs.map((run) => {
-    const isSynthetic = allowMixed ? run?.synthetic === true : synthetic;
-    const cleaned = progressiveRunData(run, isSynthetic, acceptedInputs);
+    const cleaned = progressiveRunData(run, acceptedInputs);
     if (!cleaned) throw new Error('Invalid or mixed-provenance progressive playthrough.');
     return cleaned;
   });
   const rows = progressiveExamples(sessions);
-  // Real training and evaluation use normal Adaptive Pace runs. The built-in
-  // synthetic baseline keeps its randomized examples for initial coverage.
-  const cohortPolicy = synthetic === true ? 'collect' : 'adaptive';
-  const cohort = rows.filter(({ policy, synthetic: isSynthetic }) => policy === cohortPolicy
-    && (allowMixed ? !isSynthetic : isSynthetic === synthetic));
+  const cohort = rows.filter(({ policy }) => policy === 'adaptive');
   const players = [...new Set(cohort.map(({ participant }) => participant))].sort((a, b) => hash(a).localeCompare(hash(b)));
   if (players.length < 5) return { training: 'waiting-for-players' };
   const heldOut = new Set(players.slice(0, Math.ceil(players.length / 5)));
   const testing = cohort.filter(({ participant }) => heldOut.has(participant));
-  const realTrainingAdaptive = cohort.filter(({ participant }) => !heldOut.has(participant));
-  if (!realTrainingAdaptive.some(({ completed }) => completed) || realTrainingAdaptive.every(({ completed }) => completed)) {
+  const trainingAdaptive = cohort.filter(({ participant }) => !heldOut.has(participant));
+  if (!trainingAdaptive.some(({ completed }) => completed) || trainingAdaptive.every(({ completed }) => completed)) {
     return { training: 'waiting-for-outcomes' };
   }
-  const training = allowMixed
-    ? [...rows.filter(({ synthetic: isSynthetic }) => isSynthetic),
-      ...rows.filter(({ synthetic: isSynthetic, participant, policy }) => !isSynthetic
-        && !heldOut.has(participant) && policy === 'adaptive')]
-    : rows.filter(({ participant, policy }) => !heldOut.has(participant)
-      && (synthetic || policy === 'adaptive'));
+  const training = rows.filter(({ participant, policy }) => !heldOut.has(participant) && policy === 'adaptive');
   const tree = fitTree(training, 0, PROGRESSIVE_FEATURES);
   const lengthRates = new Map();
   for (const { features: { sequenceLength }, completed } of training) {
@@ -114,20 +101,15 @@ export function trainProgressive(runs, synthetic = false, input = 'browser') {
   }
   const [minSequenceLength, maxSequenceLength] = bounds(training, 'sequenceLength');
   const [minRoundSeconds, maxRoundSeconds] = bounds(training, 'roundSeconds');
-  const containsSynthetic = sessions.some(({ synthetic: isSynthetic }) => isSynthetic);
-  const containsReal = sessions.some(({ synthetic: isSynthetic }) => !isSynthetic);
-  const model = { format: PROGRESSIVE_MODEL, input, tree, coverage: { minSequenceLength, maxSequenceLength, minRoundSeconds, maxRoundSeconds },
-    ...(containsSynthetic ? { synthetic: true, provenance: containsReal ? 'synthetic-seeded' : 'simulated' } : {}) };
+  const model = { format: PROGRESSIVE_MODEL, input, tree, coverage: { minSequenceLength, maxSequenceLength, minRoundSeconds, maxRoundSeconds } };
   const evaluation = {
     trainingParticipants: new Set(training.map(({ participant }) => participant)).size,
-    trainingRealParticipants: new Set(training.filter(({ synthetic: isSynthetic }) => !isSynthetic).map(({ participant }) => participant)).size,
-    trainingSyntheticParticipants: new Set(training.filter(({ synthetic: isSynthetic }) => isSynthetic).map(({ participant }) => participant)).size,
+    trainingRealParticipants: new Set(training.map(({ participant }) => participant)).size,
+    trainingSyntheticParticipants: 0,
     heldOutParticipants: heldOut.size, trainingRounds: training.length, heldOutRounds: testing.length,
     heldOutCleared: testing.filter(({ completed }) => completed).length,
-    evaluationProvenance: allowMixed ? 'held-out coded adaptive players' : synthetic ? 'held-out simulated participants' : 'held-out coded adaptive players',
-    evaluationScope: allowMixed || !synthetic
-      ? 'Predictive accuracy on held-out adaptive playthroughs; not a randomized comparison of pacing policies.'
-      : 'Predictive accuracy on held-out simulated playthroughs.',
+    evaluationProvenance: 'held-out coded adaptive players',
+    evaluationScope: 'Predictive accuracy on held-out human Adaptive playthroughs; not a randomized comparison of pacing policies.',
     tree: evaluate((features) => predictCompletion(tree, features)),
     lengthOnlyBaseline: evaluate(({ sequenceLength }) => {
       const counts = lengthRates.get(sequenceLength);
@@ -142,12 +124,13 @@ export function trainProgressive(runs, synthetic = false, input = 'browser') {
 
 function createProgressiveProfile(input) {
   const combined = input === 'combined';
+  const realRuns = (runs) => runs.filter((run) => run?.synthetic !== true);
   return {
   input,
   archiveFormat: PROGRESSIVE_ARCHIVE,
-  clean: (run, synthetic = false) => progressiveRunData(run, synthetic, combined ? ['browser', 'esp32'] : input),
-  modelId: (runs) => progressiveModelId(runs, input),
-  train: (runs) => trainProgressive(runs, combined ? 'mixed' : false, input),
+  clean: (run) => progressiveRunData(run, combined ? ['browser', 'esp32'] : input),
+  modelId: (runs) => progressiveModelId(realRuns(runs), input),
+  train: (runs) => trainProgressive(realRuns(runs), input),
   localRuns: 'progressive_runs',
   localModels: 'progressive_models',
   inputs: combined ? ['browser', 'esp32'] : [input],
