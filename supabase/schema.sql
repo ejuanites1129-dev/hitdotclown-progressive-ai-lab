@@ -69,8 +69,13 @@ security invoker
 set search_path = ''
 as $$
   with counts as (
-    select count(*) as runs, count(participant) as coded_runs,
-      count(distinct participant) filter (where policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1) as adaptive_players
+    select
+      count(*) as runs,
+      count(participant) as coded_runs,
+      count(distinct case
+        when policy = 'adaptive' and jsonb_array_length(run_data->'rounds') > 1 then participant
+        else null
+      end) as adaptive_players
     from public.ai_progressive_runs
   )
   select jsonb_build_object(
