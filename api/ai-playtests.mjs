@@ -2,7 +2,7 @@ import { createOnlinePlaytestStore } from '../server/supabase-playtests.mjs';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
-export function createPlaytestHandler(openStore = createOnlinePlaytestStore, maxBodyBytes = 16 * 1024) {
+export function createPlaytestHandler(openStore = createOnlinePlaytestStore, maxBodyBytes = 16 * 1024, input = 'browser') {
   return async function handle(request) {
     const url = new URL(request.url);
     const origin = request.headers.get('Origin');
@@ -25,12 +25,12 @@ export function createPlaytestHandler(openStore = createOnlinePlaytestStore, max
       if (Buffer.byteLength(payload) > maxBodyBytes) return json({ error: 'Playthrough is too large.' }, 413);
       incoming = JSON.parse(payload);
     } catch { return json({ error: 'Could not read the playthrough.' }, 400); }
-    if (incoming?.run?.input !== 'browser' || !['playthrough', 'browser_archive'].includes(incoming?.source)) {
-      return json({ error: 'Invalid browser playthrough.' }, 422);
+    if (incoming?.run?.input !== input || !['playthrough', 'browser_archive'].includes(incoming?.source)) {
+      return json({ error: 'Invalid playthrough for this input.' }, 422);
     }
     try {
       const saved = await openStore().save(incoming.run, incoming.source);
-      return saved ? json({ saved }) : json({ error: 'Invalid browser playthrough.' }, 422);
+      return saved ? json({ saved }) : json({ error: 'Invalid playthrough for this input.' }, 422);
     } catch { return json({ error: 'Could not save this playthrough.' }, 503); }
   };
 }

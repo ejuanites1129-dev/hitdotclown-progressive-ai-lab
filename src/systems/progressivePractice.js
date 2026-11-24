@@ -21,7 +21,7 @@ export function progressiveFeatures(previous, { sequenceLength, speed, livesAtSt
   };
 }
 
-export function chooseProgressivePace({ previous, sequenceLength, livesAtStart, roundSeconds, policy, model, random }) {
+export function chooseProgressivePace({ previous, sequenceLength, livesAtStart, roundSeconds, policy, model, random, input = 'browser' }) {
   if (!previous) return { speed: 1, source: 'Warm-up' };
   if (policy === 'fixed') return { speed: 1, source: 'Fixed medium pace' };
   const possible = SPEEDS.flatMap(({ ms }, speed) => {
@@ -33,7 +33,7 @@ export function chooseProgressivePace({ previous, sequenceLength, livesAtStart, 
   const nearby = available.filter((speed) => Math.abs(speed - previous.speed) <= 1);
   const choices = nearby.length ? nearby : available;
   const coverage = model?.coverage;
-  if (model?.format === PROGRESSIVE_MODEL && sequenceLength >= coverage?.minSequenceLength
+  if (model?.format === PROGRESSIVE_MODEL && model.input === input && sequenceLength >= coverage?.minSequenceLength
     && sequenceLength <= coverage?.maxSequenceLength && roundSeconds >= coverage?.minRoundSeconds && roundSeconds <= coverage?.maxRoundSeconds) {
     const [best] = choices.map((speed) => ({
       speed, probability: predictCompletion(model.tree, progressiveFeatures(previous, { sequenceLength, speed, livesAtStart, roundSeconds })),

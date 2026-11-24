@@ -10,7 +10,7 @@ export async function exportDatabaseDataset(path = endpoint) {
   return response.json();
 }
 
-export function usePlaytestDatabase(timeoutMs = 4000, path = endpoint, readArchive = readPlaytestArchive) {
+export function usePlaytestDatabase(timeoutMs = 4000, path = endpoint, readArchive = readPlaytestArchive, expectedInput = null) {
   const queue = useRef(new Map());
   const syncing = useRef(false);
   const mounted = useRef(false);
@@ -24,6 +24,7 @@ export function usePlaytestDatabase(timeoutMs = 4000, path = endpoint, readArchi
     try {
       do {
         for (const [id, entry] of queue.current) {
+          if (expectedInput && entry.run.input !== expectedInput) continue;
           const response = await fetch(path, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(entry), signal: AbortSignal.timeout(timeoutMs),
@@ -41,13 +42,13 @@ export function usePlaytestDatabase(timeoutMs = 4000, path = endpoint, readArchi
           setStatus(nextStatus);
           setAvailable(true);
         }
-      } while (queue.current.size);
+      } while ([...queue.current.values()].some((entry) => !expectedInput || entry.run.input === expectedInput));
     } catch {
       if (mounted.current) setAvailable(false);
     } finally {
       syncing.current = false;
     }
-  }, [path, timeoutMs]);
+  }, [path, timeoutMs, expectedInput]);
 
   useEffect(() => {
     mounted.current = true;

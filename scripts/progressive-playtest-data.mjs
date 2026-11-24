@@ -10,10 +10,10 @@ const hash = (value) => createHash('sha256').update(value).digest('hex');
 const integer = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
 const sources = ['Warm-up', 'Fixed medium pace', 'Randomized pace', 'Playtest-trained model', 'Simulated-data model', 'Rule-based pace'];
 
-export function progressiveRunData(run, synthetic = false) {
+export function progressiveRunData(run, synthetic = false, expectedInput = 'browser') {
   if (run?.format !== PROGRESSIVE_RUN || typeof run.id !== 'string' || !uuid.test(run.id)
     || (synthetic ? run.synthetic !== true : run.synthetic !== undefined)
-    || run.input !== 'browser' || !validRoundSeconds(run.roundSeconds)
+    || run.input !== expectedInput || !validRoundSeconds(run.roundSeconds)
     || !['adaptive', 'collect', 'fixed'].includes(run.policy)
     || !(run.participant === null || typeof run.participant === 'string' && PARTICIPANT_CODE.test(run.participant))
     || run.policy === 'collect' && !run.participant || !integer(run.score, 0, Number.MAX_SAFE_INTEGER)
@@ -52,8 +52,8 @@ export function progressiveExamples(sessions) {
   })));
 }
 
-export function progressiveModelId(runs) {
-  return hash(PROGRESSIVE_MODEL + '\n' + runs.map(({ id }) => id).join('\n'));
+export function progressiveModelId(runs, input = 'browser') {
+  return hash(PROGRESSIVE_MODEL + '\n' + input + '\n' + runs.map(({ id }) => id).join('\n'));
 }
 
 const bounds = (rows, feature) => {
@@ -61,9 +61,9 @@ const bounds = (rows, feature) => {
   return [Math.min(...values), Math.max(...values)];
 };
 
-export function trainProgressive(runs, synthetic = false) {
+export function trainProgressive(runs, synthetic = false, input = 'browser') {
   const sessions = runs.map((run) => {
-    const cleaned = progressiveRunData(run, synthetic);
+    const cleaned = progressiveRunData(run, synthetic, input);
     if (!cleaned) throw new Error('Invalid or mixed-provenance progressive playthrough.');
     return cleaned;
   });
@@ -99,7 +99,7 @@ export function trainProgressive(runs, synthetic = false) {
   }
   const [minSequenceLength, maxSequenceLength] = bounds(training, 'sequenceLength');
   const [minRoundSeconds, maxRoundSeconds] = bounds(training, 'roundSeconds');
-  const model = { format: PROGRESSIVE_MODEL, input: 'browser', tree, coverage: { minSequenceLength, maxSequenceLength, minRoundSeconds, maxRoundSeconds },
+  const model = { format: PROGRESSIVE_MODEL, input, tree, coverage: { minSequenceLength, maxSequenceLength, minRoundSeconds, maxRoundSeconds },
     ...(synthetic ? { synthetic: true } : {}) };
   const evaluation = {
     trainingParticipants: new Set(training.map(({ participant }) => participant)).size,
@@ -117,16 +117,23 @@ export function trainProgressive(runs, synthetic = false) {
   } };
 }
 
-export const progressiveProfile = {
+function createProgressiveProfile(input) {
+  const suffix = input === 'esp32' ? '_esp32' : '';
+  return {
+  input,
   archiveFormat: PROGRESSIVE_ARCHIVE,
-  clean: progressiveRunData,
-  modelId: progressiveModelId,
-  train: (runs) => trainProgressive(runs),
+  clean: (run, synthetic = false) => progressiveRunData(run, synthetic, input),
+  modelId: (runs) => progressiveModelId(runs, input),
+  train: (runs) => trainProgressive(runs, false, input),
   localRuns: 'progressive_runs',
   localModels: 'progressive_models',
-  inputs: ['browser'],
+  inputs: [input],
   requireSecondCycle: true,
-  runTable: 'ai_progressive_runs',
-  modelTable: 'ai_progressive_models',
-  snapshot: 'hitdotclown_progressive_snapshot',
-};
+  runTable: 'ai_progressive' + suffix + '_runs',
+  modelTable: 'ai_progressive' + suffix + '_models',
+  snapshot: 'hitdotclown_progressive' + suffix + '_snapshot',
+  };
+}
+
+export const progressiveProfile = createProgressiveProfile('browser');
+export const progressiveEsp32Profile = createProgressiveProfile('esp32');

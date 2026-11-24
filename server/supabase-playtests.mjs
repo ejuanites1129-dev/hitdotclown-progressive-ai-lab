@@ -1,14 +1,13 @@
 import { fixedPlaytestProfile } from '../scripts/playtest-data.mjs';
 
 const insertHeaders = { Prefer: 'resolution=ignore-duplicates,return=minimal' };
-const input = 'browser';
-
 function publicModel({ id, trained_at, model, evaluation }) {
-  return { id, input, trainedAt: trained_at, model, evaluation };
+  return { id, input: model.input ?? 'browser', trainedAt: trained_at, model, evaluation };
 }
 
 export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, profile = fixedPlaytestProfile) {
   const { runTable, modelTable, snapshot, archiveFormat } = profile;
+  const input = profile.input ?? 'browser';
   const key = env.AI_LAB_SUPABASE_SECRET_KEY;
   const url = new URL(env.AI_LAB_SUPABASE_URL ?? 'about:blank');
   if (url.protocol !== 'https:' || !url.hostname.endsWith('.supabase.co') || !key) {
@@ -77,7 +76,7 @@ export function createOnlinePlaytestStore(env = process.env, fetcher = fetch, pr
           current = await latest();
         }
       }
-      return { browser: { runs, codedRuns, randomizedPlayers, training, active: current ? publicModel(current) : null } };
+      return { [input]: { runs, codedRuns, randomizedPlayers, training, active: current ? publicModel(current) : null } };
     },
     async dataset() {
       const models = await pageAll(modelTable);
