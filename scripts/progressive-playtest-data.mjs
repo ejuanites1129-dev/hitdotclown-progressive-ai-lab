@@ -48,6 +48,7 @@ export function progressiveRunData(run, synthetic = false, expectedInput = 'brow
 export function progressiveExamples(sessions) {
   return sessions.flatMap((run) => run.participant === null ? [] : run.rounds.slice(1).map((round, index) => ({
     runId: run.id, participant: run.participant, policy: run.policy, completed: round.completed,
+    synthetic: run.synthetic === true,
     features: progressiveFeatures(run.rounds[index], { ...round, roundSeconds: run.roundSeconds }),
   })));
 }
@@ -62,21 +63,30 @@ const bounds = (rows, feature) => {
 };
 
 export function trainProgressive(runs, synthetic = false, input = 'browser') {
+  const allowMixed = synthetic === 'mixed';
   const sessions = runs.map((run) => {
-    const cleaned = progressiveRunData(run, synthetic, input);
+    const isSynthetic = allowMixed ? run?.synthetic === true : synthetic;
+    const cleaned = progressiveRunData(run, isSynthetic, input);
     if (!cleaned) throw new Error('Invalid or mixed-provenance progressive playthrough.');
     return cleaned;
   });
   const rows = progressiveExamples(sessions);
-  const randomized = rows.filter(({ policy }) => policy === 'collect');
+  const randomized = rows.filter(({ policy, synthetic: isSynthetic }) => policy === 'collect'
+    && (allowMixed ? !isSynthetic : isSynthetic === synthetic));
   const players = [...new Set(randomized.map(({ participant }) => participant))].sort((a, b) => hash(a).localeCompare(hash(b)));
   if (players.length < 5) return { training: 'waiting-for-players' };
   const heldOut = new Set(players.slice(0, Math.ceil(players.length / 5)));
-  const training = rows.filter(({ participant }) => !heldOut.has(participant));
   const testing = randomized.filter(({ participant }) => heldOut.has(participant));
-  if (!training.some(({ completed }) => completed) || training.every(({ completed }) => completed)) {
+  const realTrainingRandomized = allowMixed
+    ? randomized.filter(({ participant }) => !heldOut.has(participant))
+    : randomized.filter(({ participant }) => !heldOut.has(participant));
+  if (!realTrainingRandomized.some(({ completed }) => completed) || realTrainingRandomized.every(({ completed }) => completed)) {
     return { training: 'waiting-for-outcomes' };
   }
+  const training = allowMixed
+    ? [...rows.filter(({ synthetic: isSynthetic }) => isSynthetic),
+      ...rows.filter(({ synthetic: isSynthetic, participant }) => !isSynthetic && !heldOut.has(participant))]
+    : rows.filter(({ participant }) => !heldOut.has(participant));
   const tree = fitTree(training, 0, PROGRESSIVE_FEATURES);
   const lengthRates = new Map();
   for (const { features: { sequenceLength }, completed } of training) {
@@ -99,12 +109,17 @@ export function trainProgressive(runs, synthetic = false, input = 'browser') {
   }
   const [minSequenceLength, maxSequenceLength] = bounds(training, 'sequenceLength');
   const [minRoundSeconds, maxRoundSeconds] = bounds(training, 'roundSeconds');
+  const containsSynthetic = sessions.some(({ synthetic: isSynthetic }) => isSynthetic);
+  const containsReal = sessions.some(({ synthetic: isSynthetic }) => !isSynthetic);
   const model = { format: PROGRESSIVE_MODEL, input, tree, coverage: { minSequenceLength, maxSequenceLength, minRoundSeconds, maxRoundSeconds },
-    ...(synthetic ? { synthetic: true } : {}) };
+    ...(containsSynthetic ? { synthetic: true, provenance: containsReal ? 'synthetic-seeded' : 'simulated' } : {}) };
   const evaluation = {
     trainingParticipants: new Set(training.map(({ participant }) => participant)).size,
+    trainingRealParticipants: new Set(training.filter(({ synthetic: isSynthetic }) => !isSynthetic).map(({ participant }) => participant)).size,
+    trainingSyntheticParticipants: new Set(training.filter(({ synthetic: isSynthetic }) => isSynthetic).map(({ participant }) => participant)).size,
     heldOutParticipants: heldOut.size, trainingRounds: training.length, heldOutRounds: testing.length,
     heldOutCleared: testing.filter(({ completed }) => completed).length,
+    evaluationProvenance: allowMixed ? 'held-out real randomized participants' : synthetic ? 'held-out simulated participants' : 'held-out real randomized participants',
     tree: evaluate((features) => predictCompletion(tree, features)),
     lengthOnlyBaseline: evaluate(({ sequenceLength }) => {
       const counts = lengthRates.get(sequenceLength);
@@ -124,7 +139,7 @@ function createProgressiveProfile(input) {
   archiveFormat: PROGRESSIVE_ARCHIVE,
   clean: (run, synthetic = false) => progressiveRunData(run, synthetic, input),
   modelId: (runs) => progressiveModelId(runs, input),
-  train: (runs) => trainProgressive(runs, false, input),
+  train: (runs) => trainProgressive(runs, input === 'esp32' ? 'mixed' : false, input),
   localRuns: 'progressive_runs',
   localModels: 'progressive_models',
   inputs: [input],

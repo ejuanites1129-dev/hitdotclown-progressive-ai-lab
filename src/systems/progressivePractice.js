@@ -39,7 +39,9 @@ export function chooseProgressivePace({ previous, sequenceLength, livesAtStart, 
       speed, probability: predictCompletion(model.tree, progressiveFeatures(previous, { sequenceLength, speed, livesAtStart, roundSeconds })),
     })).sort((a, b) => Math.abs(a.probability - 0.7) - Math.abs(b.probability - 0.7)
       || Math.abs(a.speed - previous.speed) - Math.abs(b.speed - previous.speed));
-    return { ...best, source: model.synthetic ? 'Simulated-data model' : 'Playtest-trained model' };
+    const source = model.provenance === 'synthetic-seeded' ? 'Synthetic-seeded playtest model'
+      : model.synthetic ? 'Simulated-data model' : 'Playtest-trained model';
+    return { ...best, source };
   }
   const desired = previous.speed + (previous.misses || livesAtStart === 1 ? -1 : previous.playMs / previous.correctHits < 950 ? 1 : 0);
   const [speed] = choices.sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired));

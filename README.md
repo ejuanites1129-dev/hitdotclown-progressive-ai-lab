@@ -1,6 +1,14 @@
 # Hit Dot Clown AI Lab Online
 
-This unranked browser edition of **AI Carnival Challenge** uses Classic progression. Each clear adds one flash while score and lives carry over. Adaptive Pace selects the next preview duration between cycles. Completed runs save to Supabase and can train a progressive decision tree. The local AI Lab also has the five-round pilot for ESP32 practice.
+This unranked **AI Carnival Challenge** supports browser buttons and physical ESP32 targets. It uses Classic progression: each clear adds one flash while score and lives carry over. Adaptive Pace selects the next preview duration between cycles. Completed runs save to Supabase and can train a progressive decision tree.
+
+## ESP32 synthetic starter model
+
+The physical challenge includes a clearly labeled **simulated-data model** so Adaptive Pace can use the decision-tree workflow before the first real ESP32 model is available. The generated dataset is in `datasets/progressive-esp32-synthetic-playtests.json`, with a training table in `datasets/progressive-esp32-synthetic-training.csv` and the model in `src/systems/models/progressive-esp32-synthetic-demo.json`.
+
+The reproducible generator uses 300 simulated participants with varied skill and reaction profiles, a 30-second round, three shared lives, increasing sequence length, and randomized slow/medium/fast preview paces. It generates 689 labeled next-cycle examples. Its participant-grouped holdout evaluation reports 75.2% decision-tree accuracy and Brier score 0.177, compared with 67.5% accuracy and 0.240 for a sequence-length-only baseline. These are simulator results, not evidence of real player performance.
+
+Regenerate the artifacts with `npm run generate:synthetic-esp32`. To add the seed rows to Supabase, run `supabase/seed-progressive-esp32-synthetic.sql` after `supabase/schema.sql`. This inserts them into the existing `ai_progressive_esp32_runs` table; it does not create another run table or add synthetic data automatically. Each row carries `synthetic: true` and `capture_source: synthetic_seed`. The dashboard includes them in the saved-run total but excludes them from the real-player count. Once five real randomized participants have reached cycle 2 and the real training group contains both outcomes, the decision tree can use all synthetic seed rows plus real training rows. Its evaluation is calculated on held-out real participants. The model is an interim practice baseline; the application prefers the real-playtest model once one is available.
 
 ## Set up Supabase
 

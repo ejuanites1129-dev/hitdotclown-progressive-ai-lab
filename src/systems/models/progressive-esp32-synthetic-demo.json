@@ -1,0 +1,97 @@
+{
+  "format": "hit-dot-clown-progressive-tree-v1",
+  "input": "esp32",
+  "tree": {
+    "feature": "speed",
+    "threshold": 1.5,
+    "left": {
+      "feature": "speed",
+      "threshold": 0.5,
+      "left": {
+        "feature": "previousMsPerHit",
+        "threshold": 875,
+        "left": {
+          "probability": 0.9782608695652174
+        },
+        "right": {
+          "probability": 0.82
+        }
+      },
+      "right": {
+        "feature": "previousMsPerHit",
+        "threshold": 1125,
+        "left": {
+          "probability": 0.732824427480916
+        },
+        "right": {
+          "probability": 0.4166666666666667
+        }
+      }
+    },
+    "right": {
+      "feature": "livesAtStart",
+      "threshold": 2.5,
+      "left": {
+        "feature": "previousMsPerHit",
+        "threshold": 1125,
+        "left": {
+          "probability": 0.3611111111111111
+        },
+        "right": {
+          "probability": 0
+        }
+      },
+      "right": {
+        "feature": "previousMsPerHit",
+        "threshold": 1125,
+        "left": {
+          "probability": 0.65625
+        },
+        "right": {
+          "probability": 0.3333333333333333
+        }
+      }
+    }
+  },
+  "coverage": {
+    "minSequenceLength": 4,
+    "maxSequenceLength": 12,
+    "minRoundSeconds": 30,
+    "maxRoundSeconds": 30
+  },
+  "synthetic": true,
+  "provenance": "Deterministic simulated ESP32-style playthroughs. No humans, physical ESP32 signals, or live database records are included.",
+  "id": "0fc2b7d6fb78628132a4c801c3d7ecf996a28f1898f9affbdb19fb9497ef4ba5",
+  "seed": 20261125,
+  "trainingExamples": 689,
+  "evaluation": {
+    "trainingParticipants": 177,
+    "trainingRealParticipants": 0,
+    "trainingSyntheticParticipants": 177,
+    "heldOutParticipants": 45,
+    "trainingRounds": 532,
+    "heldOutRounds": 157,
+    "heldOutCleared": 112,
+    "evaluationProvenance": "held-out simulated participants",
+    "tree": {
+      "accuracy": 0.7515923566878981,
+      "brier": 0.17710918310185814,
+      "confusion": {
+        "truePositive": 95,
+        "falseNegative": 17,
+        "falsePositive": 22,
+        "trueNegative": 23
+      }
+    },
+    "lengthOnlyBaseline": {
+      "accuracy": 0.6751592356687898,
+      "brier": 0.2404457927649845,
+      "confusion": {
+        "truePositive": 104,
+        "falseNegative": 8,
+        "falsePositive": 43,
+        "trueNegative": 2
+      }
+    }
+  }
+}

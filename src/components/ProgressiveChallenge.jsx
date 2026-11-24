@@ -7,6 +7,7 @@ import { chooseProgressivePace, ProgressiveGame, PROGRESSIVE_RUN, readProgressiv
 import { DEFAULT_ROUND_SECONDS } from '../systems/timerSettings.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
 import demo from '../systems/models/progressive-synthetic-demo.json';
+import esp32Demo from '../systems/models/progressive-esp32-synthetic-demo.json';
 import { exportDatabaseDataset, usePlaytestDatabase } from './usePlaytestDatabase.js';
 import './ai-challenge.css';
 
@@ -70,7 +71,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const saveToDatabase = database.save;
   const active = database.status?.[targetInput]?.active;
   const summary = database.status?.[targetInput];
-  const model = active?.model ?? (targetInput === 'browser' ? demo : null);
+  const model = active?.model ?? (targetInput === 'browser' ? demo : esp32Demo);
   const ended = view?.status === STATUS.OVER || view?.status === STATUS.VICTORY;
   const playing = Boolean(view && !ended);
 
@@ -246,13 +247,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (policy === 'collect' && !participant) return;
     const tracker = {
       policy,
-      model: policy === 'adaptive' ? active?.model ?? null : null,
+      model: policy === 'adaptive' ? active?.model ?? esp32Demo : null,
       speed: 1,
       source: 'Warm-up',
       probability: undefined,
       currentCycle: null,
       run: { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'esp32', participant, policy, roundSeconds,
-        modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(), score: 0, rounds: [] },
+        modelId: policy === 'adaptive' ? active?.id ?? esp32Demo.id : null, startedAt: new Date().toISOString(), score: 0, rounds: [] },
     };
     hardwareRun.current = tracker;
     activeTarget.current = null;
@@ -339,8 +340,10 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         {deviceState && <p className="ai-note">Board status: {deviceState.status} · {deviceState.sequenceLength} lights · {deviceState.lives} lives</p>}
       </section>}
       {policy === 'adaptive' && <p className="ai-note">{targetInput === 'esp32'
-        ? active ? `Decision tree trained on ESP32 playthroughs. Model ${active.id.slice(0, 8)}.`
-          : 'Rule-based pace is active while coded ESP32 playtests are collected.'
+        ? active ? active.model?.provenance === 'synthetic-seeded'
+          ? `Decision tree uses synthetic seed examples and real ESP32 playtests; evaluation uses held-out real players. Model ${active.id.slice(0, 8)}.`
+          : `Decision tree trained on ESP32 playthroughs. Model ${active.id.slice(0, 8)}.`
+          : 'Simulated-data model active for ESP32 practice. Real playtests remain separate and will replace it when a validated model is available.'
         : active ? `Decision tree trained on browser playthroughs. Model ${active.id.slice(0, 8)}.`
           : 'Simulated-data model loaded. Adaptive pace uses sequence length and previous round performance.'}</p>}
       <section className="ai-code" aria-label="Class playtest">
@@ -398,7 +401,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     </section>}
     {(!view || ended) && <section className="ai-panel ai-archive" aria-label="Progressive playtest database">
       <h3>Progressive playtest database</h3>
-      {summary && <p>Saved runs <strong>{summary.runs}</strong> · Randomized players with two or more cycles <strong>{summary.randomizedPlayers}</strong></p>}
+      {summary && <p>Saved runs <strong>{summary.runs}</strong> · Synthetic seed runs <strong>{summary.syntheticRuns ?? 0}</strong> · Real randomized players with two or more cycles <strong>{summary.randomizedPlayers}</strong></p>}
       {summary?.training === 'waiting-for-players' && <p>Training needs five coded randomized players who reached cycle 2.</p>}
       {summary?.training === 'waiting-for-outcomes' && <p>Training needs both clears and failures from the assigned players.</p>}
       {database.available === false && <p>{targetInput === 'esp32'
