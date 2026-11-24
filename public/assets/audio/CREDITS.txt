@@ -1,0 +1,58 @@
+HIT THE CLOWN - AUDIO CREDITS
+
+Music: Kevin MacLeod (incompetech.com)
+"One-eyed Maestro" - idle/menu and leaderboard music
+https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100692
+
+"Super Circus" - normal gameplay music
+https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100057
+
+"Circus Tent" - frenzy music; playback limited to the five-second bonus phase
+https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100769
+
+Each track is licensed under Creative Commons: By Attribution 4.0
+https://creativecommons.org/licenses/by/4.0/
+Loops/excerpts and volume changes are used in the game. No authorship is claimed.
+Publisher licensing: https://incompetech.com/music/royalty-free/licenses/
+
+Sound effects: Mixkit, Sound Effects Free License
+https://mixkit.co/license/modal/sfxFree/
+
+Sport start bleeps - start.wav
+Clock countdown bleeps - warning.wav
+https://mixkit.co/free-sound-effects/countdown/
+
+Arcade score interface - hit.wav
+Arcade retro game over - gameover.wav
+https://mixkit.co/free-sound-effects/arcade/
+
+Game show wrong answer buzz - wrong.wav
+https://mixkit.co/free-sound-effects/wrong/
+
+Effects are incorporated into the game. Mixkit prohibits redistributing the raw
+items as stock, in a tool/template, or with source files. Downloaded WAV files
+are ignored by git; source distributions include the downloader, not the files.
+
+The setup script fetches music filenames from the publisher's official catalog:
+https://incompetech.com/agent-section/
+https://incompetech.com/music/royalty-free/pieces.json
+
+VERSION 1.10.0 EFFECT OVERRIDES (shipped separately from the legacy Mixkit files)
+
+Clown Laugh 03 - alexisrivera3d, Creative Commons Zero (CC0).
+Creator and license: https://freesound.org/people/alexisrivera3d/sounds/808419/
+Public HQ source: https://cdn.freesound.org/previews/808/808419_12674763-hq.mp3
+Converted to clown-laugh.wav; final tail faded.
+
+Race Start Countdown - kheetor. Used under the CC0 option offered by the creator.
+https://opengameart.org/content/race-start-countdown
+Source: https://opengameart.org/sites/default/files/countdown.ogg
+Converted to race-countdown.wav, trimmed/faded to four seconds.
+Three nonverbal beeps at 0/1/2 seconds and the final higher go tone at 3 seconds.
+
+Pou nya - supplied by the project owner in POU SAYING NO #shorts #youtubeshorts #fyp.mp3.
+First response extracted at 2.86-3.30 seconds to pou-nya.wav (0.44 s).
+
+round-success.wav - original three-second synthesized fanfare for this project.
+Build recipe: scripts/prepare-transition-audio.py.
+Hashes and measured durations: transition-audio.json.

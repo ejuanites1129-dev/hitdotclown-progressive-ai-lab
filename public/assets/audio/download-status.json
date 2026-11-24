@@ -1,0 +1,70 @@
+{
+  "checkedAt": "2026-11-10T18:00:43.484Z",
+  "installed": [
+    {
+      "file": "idle.mp3",
+      "title": "One-eyed Maestro",
+      "page": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100692",
+      "url": null,
+      "bytes": 4723900,
+      "sha256": "882951f783739b004472860df331398768d5e7e205bb403ba584a29760737e4d"
+    },
+    {
+      "file": "background.mp3",
+      "title": "Super Circus",
+      "page": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100057",
+      "url": null,
+      "bytes": 1617663,
+      "sha256": "1a525f34d2c46311518fe51fcc78a777150bc2bc4c659a1c14d361fd0b12738e"
+    },
+    {
+      "file": "frenzy.mp3",
+      "title": "Circus Tent",
+      "page": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100769",
+      "url": null,
+      "bytes": 1289475,
+      "sha256": "602e158aac1757e730a9c81fb59112ca3cb1150ae92adbabcf85d7e3eaded09c"
+    },
+    {
+      "file": "start.wav",
+      "title": "Sport start bleeps",
+      "page": "https://mixkit.co/free-sound-effects/countdown/",
+      "url": "https://assets.mixkit.co/active_storage/sfx/918/918.wav",
+      "bytes": 667772,
+      "sha256": "1bafb3f07eaa91dfc4d90fd9ad0b67308da88bd52355aba5ea396b740475d961"
+    },
+    {
+      "file": "hit.wav",
+      "title": "Arcade score interface",
+      "page": "https://mixkit.co/free-sound-effects/arcade/",
+      "url": "https://assets.mixkit.co/active_storage/sfx/217/217.wav",
+      "bytes": 502556,
+      "sha256": "fa719fcd3bcc3c03fee83148735fd856982049ba595de9257247c54a340f52ff"
+    },
+    {
+      "file": "warning.wav",
+      "title": "Clock countdown bleeps",
+      "page": "https://mixkit.co/free-sound-effects/countdown/",
+      "url": "https://assets.mixkit.co/active_storage/sfx/916/916.wav",
+      "bytes": 882044,
+      "sha256": "31df89eba10d7dd33e8dcc9a5a218d6391cc0bd4202253c0b4ec26216c613688"
+    },
+    {
+      "file": "wrong.wav",
+      "title": "Game show wrong answer buzz",
+      "page": "https://mixkit.co/free-sound-effects/wrong/",
+      "url": "https://assets.mixkit.co/active_storage/sfx/950/950.wav",
+      "bytes": 306780,
+      "sha256": "a277fa6b66656851f4eb2c86bba4f9844255e54b6982e2f47825516dfa7c6627"
+    },
+    {
+      "file": "gameover.wav",
+      "title": "Arcade retro game over",
+      "page": "https://mixkit.co/free-sound-effects/arcade/",
+      "url": "https://assets.mixkit.co/active_storage/sfx/213/213.wav",
+      "bytes": 294730,
+      "sha256": "57362e9978aab5f00d2d1da9e6e2a95a261ef1f7ac03d25e9b34706d22681277"
+    }
+  ],
+  "missing": []
+}

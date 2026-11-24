@@ -114,3 +114,151 @@ body { margin: 0; min-height: 100vh; }
   .leaderboard-scroll th, .leaderboard-scroll td { padding: 9px 5px; }
   .setup-settings .ai-options { grid-template-columns: 1fr; }
 }
+
+/* The AI Lab keeps the original Hit Dot Clown marquee, theme switch and header controls. */
+.carnival-app {
+  --display-bg: #100c0b;
+  --display-panel: #1b1210;
+  --display-line: #60422a;
+  --display-text: #fff0d0;
+  --display-muted: #c4ad8a;
+  --display-accent: #ffcc62;
+  width: min(100%, 1920px);
+  min-height: 100vh;
+  margin-inline: auto;
+  padding: clamp(12px, 2vw, 30px);
+  color: var(--display-text);
+  color-scheme: dark;
+  background:
+    radial-gradient(ellipse at 50% 0%, #601b1640, transparent 65%),
+    repeating-linear-gradient(110deg, transparent 0 72px, #fff0d003 73px 74px),
+    var(--display-bg);
+}
+.carnival-app[data-theme="light"] {
+  --display-bg: #fff5de;
+  --display-panel: #fffaf0;
+  --display-line: #c29558;
+  --display-text: #422419;
+  --display-muted: #765541;
+  --display-accent: #9e2e22;
+  color-scheme: light;
+  background:
+    radial-gradient(ellipse at 50% 0%, #edbf7055, transparent 65%),
+    repeating-linear-gradient(110deg, transparent 0 72px, #ad352208 73px 74px),
+    var(--display-bg);
+}
+.marquee-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  min-height: 92px;
+  margin-bottom: clamp(12px, 2vw, 22px);
+  padding: 22px 26px;
+  border: 1px solid #9b6335;
+  border-radius: 4px;
+  background: repeating-linear-gradient(120deg, #8b211a 0 48px, #941f18 48px 96px);
+  box-shadow: 0 5px 0 #4b160f, 0 12px 38px #0005, inset 0 0 0 4px #4c160f;
+}
+.marquee-header::before, .marquee-header::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  left: 15px;
+  height: 8px;
+  background: radial-gradient(circle, #ffe0a0 0 2px, #ffca5e66 3px, transparent 5px) center / 30px 8px repeat-x;
+  pointer-events: none;
+}
+.marquee-header::before { top: 7px; }
+.marquee-header::after { bottom: 7px; }
+.marquee-header .header-device { justify-self: start; z-index: 1; padding: 8px 10px; border: 1px solid #f5ca794d; border-radius: 2px; background: #3b0c0a55; color: #ffe4b4; font-size: 11px; }
+.marquee-header .display-brand {
+  z-index: 1;
+  margin: 0;
+  color: #fff3d8;
+  font: 900 clamp(30px, 4.2vw, 62px)/1 Impact, "Arial Black", sans-serif;
+  letter-spacing: .055em;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 3px 0 #4b120d;
+  white-space: nowrap;
+}
+.marquee-header .display-brand span { color: #ffdc85; font: italic 0.5em Georgia, serif; letter-spacing: 0; text-transform: lowercase; vertical-align: .2em; }
+.header-actions { z-index: 1; display: flex; justify-self: end; align-items: center; gap: 10px; }
+.icon-button { display: inline-grid; flex: 0 0 auto; width: 42px; height: 42px; place-items: center; border: 1px solid #f5ca7966; border-radius: 5px; background: #3b0c0a88; color: #ffe09b; cursor: pointer; }
+.icon-button:hover { border-color: #ffcc62; background: #4b130e; }
+.icon-button:focus-visible { outline: 3px solid #ffcc62; outline-offset: 3px; }
+.marquee-header .header-device.disconnected { color: #ffe4b4; }
+.marquee-header .header-device.connected i { background: #49db81; box-shadow: 0 0 8px #49db8155; }
+.carnival-app .ready-card, .carnival-app .leaderboard-panel {
+  background: radial-gradient(ellipse at 50% 0%, #79331b30, transparent 75%), linear-gradient(155deg, #241613 0%, #1b1210 60%, #170f0d 100%);
+}
+.carnival-app .ready-card h1 { color: #fff0d0; }
+.carnival-app .ready-instructions { color: #d9b783; }
+.carnival-app .privacy-copy { color: #d6b58b; }
+.ai-settings-dialog {
+  width: min(1100px, 95vw);
+  max-width: none;
+  max-height: 90svh;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--display-line);
+  border-top: 4px solid #bf3928;
+  border-radius: 8px;
+  background: var(--display-panel);
+  color: var(--display-text);
+  box-shadow: 0 20px 80px #0008;
+}
+.ai-settings-dialog::backdrop { background: #080504bb; backdrop-filter: blur(5px); }
+.ai-settings-dialog .settings-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--display-line);
+  background: var(--display-panel);
+}
+.ai-settings-dialog .settings-heading h2 { margin: 0; color: var(--display-accent); font: 700 clamp(1.15rem, 3vw, 1.45rem) Georgia, serif; }
+.ai-settings-dialog .settings-heading .icon-button { background: transparent; color: var(--display-accent); border-color: var(--display-line); font-size: 27px; line-height: 1; }
+.ai-settings-body { max-height: calc(90svh - 78px); overflow: auto; padding: 0 clamp(16px, 3vw, 24px) 24px; }
+.ai-settings-body .settings-quick-actions { padding: 16px 0 4px; }
+.ai-settings-body .operator-section { padding: 20px 0; margin-top: 18px; border-top: 1px solid var(--display-line); }
+.ai-settings-body .operator-section h3 { margin: 0 0 12px; color: var(--display-accent); font: 700 1.15rem Georgia, serif; }
+.ai-settings-body .setup-settings { width: 100% !important; margin: 0 !important; padding: 0; border: 0; background: transparent; }
+.ai-settings-body .setup-settings .ai-code { padding-top: 16px; }
+.ai-settings-body .display-timer-form { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--display-line); }
+.ai-settings-body .display-field { display: block; min-width: min(250px, 100%); font-size: .875rem; font-weight: 600; }
+.ai-settings-body .display-field input { display: block; width: 100%; min-height: 42px; margin-top: 5px; padding: 8px 10px; border: 1px solid var(--display-line); border-radius: 4px; background: var(--display-bg); color: var(--display-text); font: inherit; }
+.ai-settings-body .display-help { color: var(--display-muted); font-size: .875rem; }
+.ai-settings-body .display-help a { color: var(--display-accent); }
+.ai-settings-body .serial-log { width: 100%; height: 260px; margin-top: 12px; padding: 12px; overflow: auto; resize: vertical; border: 1px solid var(--display-line); border-radius: 4px; background: var(--display-bg); color: var(--display-text); font: 12px/1.6 Consolas, monospace; white-space: pre; }
+.ai-settings-body .ai-settings-section p { color: var(--display-muted); }
+.carnival-app[data-theme="light"] .ready-card,
+.carnival-app[data-theme="light"] .leaderboard-panel {
+  background: radial-gradient(ellipse at 50% 0%, #f2d49655, transparent 75%), var(--display-panel);
+  box-shadow: 0 8px 24px #6d321014;
+}
+.carnival-app[data-theme="light"] .ready-card::before { border-color: #c2955860; }
+.carnival-app[data-theme="light"] .ready-card h1 { color: #422419; }
+.carnival-app[data-theme="light"] .ready-instructions,
+.carnival-app[data-theme="light"] .privacy-copy { color: #765541; }
+.carnival-app[data-theme="light"] .ai-consent-dialog .consent-choice { background: #fff5de; }
+@media (max-width: 700px) {
+  .marquee-header { grid-template-columns: 1fr auto; gap: 10px; padding: 24px 12px; }
+  .marquee-header .header-device { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
+  .marquee-header .display-brand { grid-column: 1; grid-row: 1; justify-self: center; font-size: clamp(25px, 8vw, 42px); }
+  .marquee-header .header-actions { grid-column: 2; grid-row: 1; gap: 5px; }
+  .marquee-header .icon-button { width: 36px; height: 36px; }
+  .ai-settings-dialog { width: min(96vw, 620px); }
+}
+@media (max-width: 520px) {
+  .carnival-app { padding: 10px; }
+  .ai-settings-dialog .settings-heading { padding: 14px; }
+  .ai-settings-body .settings-quick-actions { gap: 7px; }
+}

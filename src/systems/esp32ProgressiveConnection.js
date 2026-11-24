@@ -30,10 +30,13 @@ export function parseEsp32Event(line) {
 }
 
 export class Esp32ProgressiveConnection {
-  constructor({ onEvent = () => {}, onConnection = () => {}, onError = () => {} } = {}) {
+  constructor({ onEvent = () => {}, onConnection = () => {}, onError = () => {}, onLog = () => {}, onDiagnostics = () => {} } = {}) {
     this.onEvent = onEvent;
     this.onConnection = onConnection;
     this.onError = onError;
+    this.onLog = onLog;
+    this.onDiagnostics = onDiagnostics;
+    this.diagnostics = { bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0, firmware: '' };
     this.port = null;
     this.reader = null;
     this.readTask = null;
@@ -52,6 +55,8 @@ export class Esp32ProgressiveConnection {
       if (this.disposed) { await port.close(); return; }
       this.port = port;
       this.stopping = false;
+      this.diagnostics = { bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0, firmware: '' };
+      this.onDiagnostics({ ...this.diagnostics });
       this.onConnection(true);
       this.readTask = this.readLoop(port);
       setTimeout(() => {
@@ -74,11 +79,21 @@ export class Esp32ProgressiveConnection {
             const { value, done } = await this.reader.read();
             if (done) break;
             if (!value) continue;
+            this.diagnostics.bytesReceived += value.byteLength;
+            this.onDiagnostics({ ...this.diagnostics });
             for (const character of decoder.decode(value, { stream: true })) {
               if (character === '\n') {
-                const event = parseEsp32Event(buffer.trim());
+                const line = buffer.trim();
                 buffer = '';
+                if (!line) continue;
+                this.diagnostics.linesReceived++;
+                this.onLog('RX', line);
+                const event = parseEsp32Event(line);
                 if (!event) continue;
+                if (event.type === 'hello') this.diagnostics.firmware = event.version;
+                if (event.type === 'state') this.diagnostics.stateMessages++;
+                if (event.type === 'sensor-hit') this.diagnostics.hitMessages++;
+                this.onDiagnostics({ ...this.diagnostics });
                 if (event.type === 'settings') this.resolveSetting(event);
                 if (event.type === 'error') this.rejectSettings(new Error(event.message));
                 this.onEvent(event);
@@ -96,7 +111,7 @@ export class Esp32ProgressiveConnection {
   }
 
   sendCommand(command) {
-    if (!['START', 'RESET', 'PING'].includes(command) && !/^SET_(?:TIME \d{1,3}|LIGHT_MS \d{1,4})$/.test(command)) {
+    if (!['START', 'RESET', 'PING', 'TEST_LEDS'].includes(command) && !/^SET_(?:TIME \d{1,3}|LIGHT_MS \d{1,4})$/.test(command)) {
       return Promise.reject(new Error('Unsupported ESP32 command.'));
     }
     const port = this.port;
@@ -104,8 +119,12 @@ export class Esp32ProgressiveConnection {
     const write = this.writeQueue.then(async () => {
       if (this.port !== port || this.stopping || !port.writable) throw new Error('ESP32 disconnected.');
       const writer = port.writable.getWriter();
-      try { await writer.write(new TextEncoder().encode(command + '\n')); }
+      const encoded = new TextEncoder().encode(command + '\n');
+      try { await writer.write(encoded); }
       finally { writer.releaseLock(); }
+      this.diagnostics.bytesSent += encoded.byteLength;
+      this.onLog('TX', command);
+      this.onDiagnostics({ ...this.diagnostics });
     });
     this.writeQueue = write.catch(() => {});
     return write;

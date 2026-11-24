@@ -1,0 +1,18 @@
+{
+  "pou-nya.wav": {
+    "seconds": 0.44,
+    "sha256": "bb213eab47ccd2c50b31a50e5034d4c0f193caa5f6da6588c3c4c2a76c7bf9d9"
+  },
+  "clown-laugh.wav": {
+    "seconds": 3.443832199546485,
+    "sha256": "73839fe1f68a9d7af783248fd0572069805e6ff3395f51e48abf010d84dbe1a1"
+  },
+  "race-countdown.wav": {
+    "seconds": 4.0,
+    "sha256": "c1c96ba07df03c8550d7d0c997ea16de61155a1b8b2d342754b0a601ee526eaf"
+  },
+  "round-success.wav": {
+    "seconds": 3.0,
+    "sha256": "c8a886300931eb25e2310a90f836328614867c712718019b5cb06b21700fe894"
+  }
+}

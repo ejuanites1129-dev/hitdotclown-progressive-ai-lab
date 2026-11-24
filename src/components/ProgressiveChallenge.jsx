@@ -5,8 +5,9 @@ import { SPEEDS } from '../systems/aiPractice.js';
 import { STATUS } from '../systems/gameLogic.js';
 import { chooseProgressivePace, normalizeParticipantLabel, ProgressiveGame, PROGRESSIVE_CONSENT_VERSION,
   PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
-import { DEFAULT_ROUND_SECONDS } from '../systems/timerSettings.js';
+import { DEFAULT_ROUND_SECONDS, TIMER_KEY, validRoundSeconds, requireRoundSeconds } from '../systems/timerSettings.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
+import audioManager from '../systems/soundtrackManager.js';
 import { exportDatabaseDataset, usePlaytestDatabase } from './usePlaytestDatabase.js';
 import LeaderboardPanel from './LeaderboardPanel.jsx';
 import { useLeaderboard } from './useLeaderboard.js';
@@ -44,7 +45,9 @@ function phase(state) {
   }
 }
 
-export default function ProgressiveChallenge({ onControlsChange, browserOnly = false, roundSeconds = DEFAULT_ROUND_SECONDS, pilotLink }) {
+export default function ProgressiveChallenge({ onControlsChange, browserOnly = false, roundSeconds = DEFAULT_ROUND_SECONDS, pilotLink,
+  settingsOpen = false, onSettingsOpenChange = () => {}, theme = 'dark', onThemeToggle = () => {},
+  musicEnabled = true, musicStatus = { state: 'waiting', track: null, message: '' }, onToggleMusic = () => {} }) {
   const [policy, setPolicy] = useState('adaptive');
   const [targetInput, setTargetInput] = useState('browser');
   const [consentOpen, setConsentOpen] = useState(false);
@@ -54,7 +57,14 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const [shareLeaderboard, setShareLeaderboard] = useState(false);
   const [shareAiData, setShareAiData] = useState(false);
   const [sendLeaderboardEmail, setSendLeaderboardEmail] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [roundDuration, setRoundDuration] = useState(roundSeconds);
+  const [roundDraft, setRoundDraft] = useState(String(roundSeconds));
+  const [settingsMessage, setSettingsMessage] = useState('');
+  const [timerSaving, setTimerSaving] = useState(false);
+  const settingsDialog = useRef(null);
+  const serialLogView = useRef(null);
+  const lastLoggedState = useRef('');
+  const previousAudioState = useRef(null);
   const [leaderboardOpen, setLeaderboardOpen] = useState(true);
   const [view, setView] = useState(null);
   const [result, setResult] = useState(null);
@@ -65,6 +75,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const [deviceHello, setDeviceHello] = useState(null);
   const [deviceState, setDeviceState] = useState(null);
   const [deviceMessage, setDeviceMessage] = useState('');
+  const [serialInfo, setSerialInfo] = useState({ bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0, firmware: '' });
+  const [serialLogs, setSerialLogs] = useState([]);
   const [memoryTarget, setMemoryTarget] = useState(null);
   const running = useRef(null);
   const playerSession = useRef(null);
@@ -83,6 +95,10 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const model = active?.model ?? null;
   const ended = view?.status === STATUS.OVER || view?.status === STATUS.VICTORY;
   const playing = Boolean(view && !ended);
+
+  function changeSettings(next) {
+    onSettingsOpenChange(typeof next === 'function' ? next(settingsOpen) : next);
+  }
 
   const recordLeaderboardResult = useCallback((completed) => {
     const player = playerSession.current;
@@ -110,7 +126,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (!cycle) return null;
     const livesLeft = Math.max(0, Math.min(cycle.livesAtStart, state.lives));
     const correctHits = completed ? cycle.sequenceLength : Math.max(0, Math.min(cycle.sequenceLength, state.playerPosition));
-    const playMs = Math.min(roundSeconds * 1000, Math.max(0, Math.round(Date.now() - (cycle.turnStartedAt ?? Date.now()))));
+    const playMs = Math.min(roundDuration * 1000, Math.max(0, Math.round(Date.now() - (cycle.turnStartedAt ?? Date.now()))));
     const round = {
       sequenceLength: cycle.sequenceLength, speed: tracker.speed, source: tracker.source,
       livesAtStart: cycle.livesAtStart, livesLeft, correctHits, misses: cycle.livesAtStart - livesLeft,
@@ -146,6 +162,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     }
     if (event.type === 'settings') {
       setDeviceState((current) => current ? { ...current, roundSeconds: event.roundSeconds, lightSeconds: event.lightSeconds } : current);
+      setRoundDuration(event.roundSeconds);
+      setRoundDraft(String(event.roundSeconds));
       return;
     }
     if (event.type === 'error') { setDeviceMessage(event.message); return; }
@@ -190,7 +208,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       const round = finishHardwareCycle(tracker, event, true);
       if (round) {
         const pace = chooseProgressivePace({ previous: round, sequenceLength: event.sequenceLength + 1,
-          livesAtStart: event.lives, roundSeconds, policy: tracker.policy,
+          livesAtStart: event.lives, roundSeconds: roundDuration, policy: tracker.policy,
           model: tracker.policy === 'adaptive' ? tracker.model : null, input: 'esp32' });
         tracker.speed = pace.speed;
         tracker.source = pace.source;
@@ -209,6 +227,10 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   deviceHandler.current = handleHardwareEvent;
 
   useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(TIMER_KEY));
+      if (validRoundSeconds(saved)) { setRoundDuration(saved); setRoundDraft(String(saved)); }
+    } catch { /* Use the default cycle timer when storage is unavailable. */ }
     const frame = requestAnimationFrame(() => setReady(true));
     const timer = setInterval(() => {
       const current = running.current;
@@ -218,9 +240,54 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   }, [show]);
 
   useEffect(() => {
+    const dialog = settingsDialog.current;
+    if (!dialog) return;
+    if (settingsOpen && !dialog.open) dialog.showModal();
+    else if (!settingsOpen && dialog.open) dialog.close();
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    const status = view?.status;
+    const previous = previousAudioState.current;
+    const scene = status === STATUS.FRENZY ? 'frenzy'
+      : [STATUS.MEMORY, STATUS.PLAYER, STATUS.HIT, STATUS.WRONG, STATUS.BREAK].includes(status) ? 'gameplay'
+        : status === STATUS.COUNTDOWN || status === STATUS.TEST || !status || ended ? 'idle' : 'silent';
+    audioManager.setScene(scene);
+    audioManager.updateWarning(view?.time, [STATUS.MEMORY, STATUS.PLAYER, STATUS.HIT, STATUS.WRONG].includes(status));
+    if (status && status !== previous) {
+      if (status === STATUS.COUNTDOWN) audioManager.play('start');
+      else if (status === STATUS.HIT) audioManager.play('hit');
+      else if (status === STATUS.WRONG) audioManager.play('wrong');
+      else if (status === STATUS.FRENZY) audioManager.play('frenzy');
+      else if (status === STATUS.VICTORY) audioManager.play('victory');
+      else if (status === STATUS.OVER) audioManager.play(view?.time === 0 ? 'timeout' : 'gameover');
+      else if (status === STATUS.BREAK && view?.breakPhase === 'success') audioManager.play('roundComplete');
+    }
+    previousAudioState.current = status ?? null;
+  }, [view?.status, view?.time, view?.breakPhase, ended]);
+
+  useEffect(() => {
+    if (settingsOpen && serialLogView.current) serialLogView.current.scrollTop = serialLogView.current.scrollHeight;
+  }, [settingsOpen, serialLogs]);
+
+  useEffect(() => {
     setSerialSupported(Boolean(navigator.serial && window.isSecureContext));
     const connection = new Esp32ProgressiveConnection({
       onEvent: (event) => deviceHandler.current(event),
+      onDiagnostics: (diagnostics) => setSerialInfo(diagnostics),
+      onLog: (direction, text) => {
+        if (direction === 'RX') {
+          try {
+            const message = JSON.parse(text);
+            if (message.type === 'state') {
+              const key = [message.status, message.sequenceLength, message.playerPosition, message.lives, message.time, message.countdown].join(':');
+              if (key === lastLoggedState.current) return;
+              lastLoggedState.current = key;
+            }
+          } catch { /* Keep raw serial diagnostics, including non-JSON lines. */ }
+        }
+        setSerialLogs((entries) => [...entries, { direction, text, time: new Date().toISOString() }].slice(-1000));
+      },
       onConnection: (connected) => {
         setDeviceConnected(connected);
         if (connected) setDeviceMessage('ESP32 connected. Checking its firmware…');
@@ -252,6 +319,36 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     catch (error) { setDeviceMessage(error.message); }
   }
 
+  async function testTargetLights() {
+    if (!deviceConnected || playing || timerSaving) return;
+    setDeviceMessage('Testing the five physical target lights…');
+    try {
+      await deviceRef.current?.sendCommand('TEST_LEDS');
+      setDeviceMessage('LED test sent to the ESP32. Check that all five target lights respond.');
+    } catch (error) { setDeviceMessage(error.message); }
+  }
+
+  async function saveRoundTimer(event) {
+    event.preventDefault();
+    if (playing || timerSaving) return;
+    setTimerSaving(true);
+    setSettingsMessage('');
+    try {
+      const seconds = requireRoundSeconds(Number(roundDraft));
+      if (targetInput === 'esp32') {
+        if (!deviceConnected || !deviceHello?.adaptivePace || deviceState?.status !== STATUS.READY) {
+          throw new Error('Connect the AI-compatible ESP32 and wait for Ready before changing its cycle timer.');
+        }
+        await deviceRef.current?.setRoundSeconds(seconds);
+      }
+      setRoundDuration(seconds);
+      setRoundDraft(String(seconds));
+      try { localStorage.setItem(TIMER_KEY, String(seconds)); } catch { /* The setting stays active for this visit. */ }
+      setSettingsMessage(`Cycle timer saved: ${seconds} seconds.`);
+    } catch (error) { setSettingsMessage(error.message); }
+    finally { setTimerSaving(false); }
+  }
+
   async function startHardware(participant, consentVersion) {
     if (!deviceConnected || !deviceHello?.adaptivePace || deviceState?.status !== STATUS.READY) {
       setDeviceMessage('Connect the ESP32 with the AI compatible firmware and wait for Ready.');
@@ -264,7 +361,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       source: 'Warm-up',
       probability: undefined,
       currentCycle: null,
-      run: { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'esp32', participant, policy, roundSeconds,
+      run: { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'esp32', participant, policy, roundSeconds: roundDuration,
         modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(), score: 0, rounds: [],
         ...(consentVersion ? { consentVersion } : {}) },
     };
@@ -274,7 +371,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     setResult(null);
     setDeviceMessage('Setting the first medium preview…');
     try {
-      await deviceRef.current.setRoundSeconds(roundSeconds);
+      await deviceRef.current.setRoundSeconds(roundDuration);
       await deviceRef.current.setLightMilliseconds(SPEEDS[1].ms);
       await deviceRef.current.sendCommand('START');
       setDeviceMessage('ESP32 game started. Watch the lights, then hit the physical targets in order.');
@@ -297,8 +394,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     const consentVersion = trainModel ? PROGRESSIVE_CONSENT_VERSION : null;
     playerSession.current = { username, email, shareLeaderboard: saveScore, emailLink };
     if (targetInput === 'esp32') { void startHardware(participant, consentVersion); return; }
-    const engine = new ProgressiveGame({ policy, model: policy === 'adaptive' ? model : null, roundSeconds });
-    const run = { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'browser', participant, policy, roundSeconds,
+    const engine = new ProgressiveGame({ policy, model: policy === 'adaptive' ? model : null, roundSeconds: roundDuration });
+    const run = { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'browser', participant, policy, roundSeconds: roundDuration,
       modelId: policy === 'adaptive' ? active?.id ?? null : null, startedAt: new Date().toISOString(),
       ...(consentVersion ? { consentVersion } : {}) };
     running.current = { engine, run };
@@ -374,12 +471,12 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const setupPanel = <section className="ai-panel setup-settings" aria-label="Game and ESP32 settings">
     <div className="ai-options">
       <label htmlFor="progressive-pace">Round settings
-        <select id="progressive-pace" value={policy} onChange={(event) => setPolicy(event.target.value)} disabled={!ready}>
+        <select id="progressive-pace" value={policy} onChange={(event) => setPolicy(event.target.value)} disabled={!ready || playing}>
           <option value="adaptive">Adaptive pace</option><option value="fixed">Fixed medium pace</option>
         </select>
       </label>
       <label htmlFor="progressive-input">Targets
-        <select id="progressive-input" value={targetInput} onChange={(event) => { setTargetInput(event.target.value); setDeviceMessage(''); }} disabled={!ready}>
+        <select id="progressive-input" value={targetInput} onChange={(event) => { setTargetInput(event.target.value); setDeviceMessage(''); }} disabled={!ready || playing}>
           <option value="browser">Browser buttons</option><option value="esp32">ESP32 physical targets</option>
         </select>
       </label>
@@ -391,6 +488,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       <div className="ai-actions">
         {!deviceConnected ? <button type="button" disabled={!serialSupported || !ready} onClick={connectEsp32}>Connect ESP32</button>
           : <button type="button" disabled={playing} onClick={() => void deviceRef.current?.disconnect()}>Disconnect ESP32</button>}
+        <button type="button" disabled={!deviceConnected || playing || timerSaving} onClick={() => void testTargetLights()}>Test all LEDs</button>
         <span className={'device-status ' + (deviceConnected ? 'connected' : 'disconnected')}><i />{deviceConnected ? deviceHello?.adaptivePace ? 'ESP32 connected' : 'Firmware update needed' : 'ESP32 disconnected'}</span>
       </div>
       {deviceMessage && <p className="ai-note" role="status">{deviceMessage}</p>}
@@ -399,7 +497,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     {policy === 'adaptive' && <p className="ai-note">{active
       ? `Human-playtest decision tree active for Adaptive Pace on browser and ESP32. Model ${active.id.slice(0, 8)}.`
       : 'No human-trained model yet. Adaptive Pace uses the rule-based fallback while consenting human playthroughs are collected.'}</p>}
-    <p className="ai-note">{roundSeconds} seconds per cycle, including the preview. The AI data option appears when Adaptive Pace is selected.</p>
+    <p className="ai-note">{roundDuration} seconds per cycle, including the preview. Adaptive Pace selects a flash speed from the previous cycle; the AI data option appears when Adaptive Pace is selected.</p>
   </section>;
 
   return <section className="ai-carnival progressive-carnival" aria-label="Hit Dot Clown">
@@ -412,7 +510,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
           <p>Every completed cycle adds one step: 3, 4, 5, 6 and onward.</p>
           <p>From cycle 5, ignore the flickering distractions during your turn.</p>
         </div>
-        <p className="ready-duration">{roundSeconds} seconds per cycle</p>
+        <p className="ready-duration">{roundDuration} seconds per cycle</p>
         <div className="player-fields">
           <label htmlFor="lobby-player-name">Player name
             <input id="lobby-player-name" value={playerName} onChange={(event) => setPlayerName(event.target.value)} maxLength={24} autoComplete="nickname" placeholder="Enter your name" />
@@ -425,28 +523,12 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         <button type="button" className="display-start-button" onClick={start} disabled={!ready || !hardwareReady}>Start game</button>
         {!hardwareReady && <p className="ai-note">Connect the ESP32 and wait for Ready in Settings, or switch Targets to Browser buttons.</p>}
         <div className="lobby-buttons">
-          <button type="button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>{settingsOpen ? 'Hide settings' : 'Settings & ESP32'}</button>
           <button type="button" onClick={() => setLeaderboardOpen((open) => !open)} aria-expanded={leaderboardOpen}>{leaderboardOpen ? 'Hide leaderboard' : 'Show leaderboard'}</button>
         </div>
       </section>
       {leaderboardOpen && <LeaderboardPanel entries={leaderboard.entries} pending={leaderboard.pending} message={leaderboard.message}
         configured={leaderboard.configured} refresh={leaderboard.refresh} />}
     </div>}
-    {!view && settingsOpen && setupPanel}
-    {!view && settingsOpen && <section className="ai-panel ai-archive" aria-label="Adaptive Pace play data">
-      <h3>Adaptive Pace play data</h3>
-      {summary && <p>Human coded playthroughs <strong>{summary.codedRuns ?? 0}</strong> · Synthetic rows <strong>{summary.syntheticRuns ?? 0}</strong> · Players reaching Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
-      <p className="ai-note">Browser and ESP32 runs use the same training pool when players opt in. The leaderboard and AI training databases are separate.</p>
-      {summary?.training === 'waiting-for-players' && <p>Training needs five distinct consenting usernames with an Adaptive run reaching cycle 2.</p>}
-      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from consenting Adaptive players.</p>}
-      {database.available === false && <p>{targetInput === 'esp32' ? 'The ESP32 playtest table is not available yet. Run the updated AI Lab schema, then queued runs will retry.' : 'The AI Lab database is unavailable. Saved consenting browser runs will retry.'}</p>}
-      {receipt && <output>{receipt === 'saved' ? 'This run was saved to the AI training database.'
-        : receipt === 'rejected' ? 'The AI Lab rejected this run. Download it to keep a copy.' : 'This AI training run is waiting to sync.'}</output>}
-      <div className="ai-actions">
-        {!browserOnly && <button type="button" disabled={!database.available} onClick={exportRuns}>Export progressive dataset</button>}
-        <button type="button" onClick={() => { try { download(readProgressiveArchive(localStorage), 'hit-dot-clown-progressive-browser-backup.json'); } catch { setNotice('Browser backup is unavailable.'); } }}>Export browser backup</button>
-      </div>
-    </section>}
     {!view && consentOpen && <div className="ai-consent-backdrop">
       <section className="ai-consent-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-consent-title" aria-describedby="ai-consent-copy">
         <h2 id="ai-consent-title">Before your game</h2>
@@ -509,21 +591,72 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
           <button type="button" onClick={() => download(result, 'hit-dot-clown-progressive-run.json')}>Download this run</button></div>
       </>}
     </section>}
-    {ended && settingsOpen && <section className="ai-panel ai-archive" aria-label="Adaptive Pace play data">
-      <h3>Adaptive Pace play data</h3>
-      {summary && <p>Human coded playthroughs <strong>{summary.codedRuns ?? 0}</strong> · Synthetic rows <strong>{summary.syntheticRuns ?? 0}</strong> · Players reaching Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
-      <p className="ai-note">Browser and ESP32 runs use the same training pool when players opt in. The leaderboard and AI training databases are separate.</p>
-      {summary?.training === 'waiting-for-players' && <p>Training needs five distinct consenting usernames with an Adaptive run reaching cycle 2.</p>}
-      {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from consenting Adaptive players.</p>}
-      {database.available === false && <p>The AI Lab database is unavailable. Saved consenting runs will retry.</p>}
-      {receipt && <output>{receipt === 'saved' ? 'This run was saved to the AI training database.'
-        : receipt === 'rejected' ? 'The AI Lab rejected this run. Download it to keep a copy.' : 'This AI training run is waiting to sync.'}</output>}
-      <div className="ai-actions">
-        {!browserOnly && <button type="button" disabled={!database.available} onClick={exportRuns}>Export progressive dataset</button>}
-        <button type="button" onClick={() => { try { download(readProgressiveArchive(localStorage), 'hit-dot-clown-progressive-browser-backup.json'); } catch { setNotice('Browser backup is unavailable.'); } }}>Export browser backup</button>
-        {pilotLink}
+    <dialog ref={settingsDialog} className="settings-dialog ai-settings-dialog" aria-labelledby="settings-title"
+      onCancel={() => changeSettings(false)} onClose={() => changeSettings(false)}>
+      <div className="settings-heading"><h2 id="settings-title">Settings &amp; operator controls</h2>
+        <button type="button" className="icon-button" aria-label="Close settings" onClick={() => changeSettings(false)}>×</button></div>
+      <div className="display-operator-panel ai-settings-body">
+        <div className="display-operator-row settings-quick-actions">
+          <button type="button" className="display-button" disabled={!view || playing || timerSaving} onClick={returnToSetup}>Reset</button>
+          <button type="button" className="display-button" data-sound-control="true" aria-pressed={musicEnabled} onClick={() => void onToggleMusic()}>
+            {musicEnabled ? 'Music on' : 'Music off'}
+          </button>
+          <button type="button" className="display-button" onClick={onThemeToggle}>{theme === 'dark' ? 'Light carnival mode' : 'Dark carnival mode'}</button>
+        </div>
+        <section className="operator-section ai-settings-section" aria-label="Round and target settings">
+          <h3>Game and ESP32 settings</h3>
+          {setupPanel}
+          <form className="display-timer-form" onSubmit={saveRoundTimer}>
+            <div className="display-operator-row">
+              <label className="display-field" htmlFor="ai-round-timer">Round timer (seconds)
+                <input id="ai-round-timer" type="number" min="5" max="300" step="1" required value={roundDraft}
+                  disabled={!ready || playing || timerSaving} onChange={(event) => setRoundDraft(event.target.value)} />
+              </label>
+              <button type="submit" className="display-button primary" disabled={!ready || playing || timerSaving}>
+                {timerSaving ? 'Saving…' : 'Save timer'}
+              </button>
+            </div>
+            <p className="display-help">The timer covers each full cycle, including its sequence preview. Choose 5 to 300 seconds. Browser settings are remembered here; a connected ESP32 receives the same value.</p>
+            {settingsMessage && <output className="display-settings-message" role="status">{settingsMessage}</output>}
+          </form>
+          <p className="display-help">{targetInput === 'esp32'
+            ? 'For physical play, use Chrome or Edge over HTTPS or localhost and close Arduino Serial Monitor before connecting.'
+            : 'Browser buttons work without the ESP32. Select ESP32 physical targets above when the board is available.'}</p>
+          {deviceState && <p className="display-help">Board status: {deviceState.status} · {deviceState.sequenceLength} lights · {deviceState.lives} lives.</p>}
+          {deviceMessage && <output className="display-settings-message" role="status">{deviceMessage}</output>}
+        </section>
+        <section className="operator-section ai-settings-section" aria-label="Adaptive Pace training data">
+          <h3>Adaptive Pace play data</h3>
+          {summary && <p>Human playthroughs <strong>{summary.codedRuns ?? 0}</strong> · Synthetic rows <strong>{summary.syntheticRuns ?? 0}</strong> · Players reaching Adaptive cycle 2 <strong>{summary.adaptivePlayers ?? 0}</strong></p>}
+          <p className="ai-note">Browser and ESP32 consenting playthroughs share the training pool. Leaderboard contact data stays separate from AI training records.</p>
+          {summary?.training === 'waiting-for-players' && <p>Training needs five distinct consenting usernames with an Adaptive run reaching cycle 2.</p>}
+          {summary?.training === 'waiting-for-outcomes' && <p>Training needs both cleared and failed cycles from consenting Adaptive players.</p>}
+          {database.available === false && <p>{targetInput === 'esp32' ? 'The ESP32 playtest table is not available yet. Run the updated AI Lab schema; queued runs will retry.' : 'The AI Lab database is unavailable. Saved consenting browser runs will retry.'}</p>}
+          {receipt && <output role="status">{receipt === 'saved' ? 'This run was saved to the AI training database.'
+            : receipt === 'rejected' ? 'The AI Lab rejected this run. Download it to keep a copy.' : 'This AI training run is waiting to sync.'}</output>}
+          <div className="ai-actions">
+            {!browserOnly && <button type="button" disabled={!database.available} onClick={exportRuns}>Export progressive dataset</button>}
+            <button type="button" onClick={() => { try { download(readProgressiveArchive(localStorage), 'hit-dot-clown-progressive-browser-backup.json'); } catch { setNotice('Browser backup is unavailable.'); } }}>Export browser backup</button>
+            {pilotLink}
+          </div>
+        </section>
+        <section className="operator-section ai-settings-section" aria-label="ESP32 serial monitor">
+          <h3>Serial monitor</h3>
+          <p className="display-help">Firmware: <strong>{deviceConnected ? serialInfo.firmware || 'Checking…' : 'Not connected'}</strong> · Game phase: {deviceState?.status || 'READY'} · RX: {serialInfo.bytesReceived} bytes · TX: {serialInfo.bytesSent} bytes · States: {serialInfo.stateMessages} · Hits: {serialInfo.hitMessages}</p>
+          <div className="display-operator-row"><button type="button" className="display-button" onClick={() => { setSerialLogs([]); lastLoggedState.current = ''; }}>Clear log</button>
+            <span className="display-help">Recent ESP32 messages, up to 1,000 lines</span></div>
+          <textarea className="serial-log" ref={serialLogView} readOnly aria-label="ESP32 serial message log"
+            value={serialLogs.length ? serialLogs.map((line) => `[${new Date(line.time).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour12: false })}] ${line.direction} ${line.text}`).join('\n') : 'Connect the ESP32 to see serial messages here.'} />
+        </section>
+        <section className="operator-section ai-settings-section" aria-label="Carnival music">
+          <h3>Carnival music</h3>
+          <p className="display-help" role="status">{musicStatus.message || (musicStatus.state === 'playing' ? 'Carnival music is playing.'
+            : musicStatus.state === 'muted' ? 'Music and sound effects are off.'
+              : musicStatus.state === 'loading' ? 'Loading carnival music…' : 'Music starts after your first interaction with the page.')}</p>
+          <p className="display-help">Music by Kevin MacLeod (incompetech.com), CC BY 4.0. <a href="/assets/audio/CREDITS.txt" target="_blank" rel="noreferrer">Audio credits and sources</a></p>
+        </section>
       </div>
-    </section>}
+    </dialog>
     {notice && <output>{notice}</output>}
   </section>;
 }
