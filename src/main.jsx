@@ -1,13 +1,19 @@
 import { createRoot } from 'react-dom/client';
+import { useState } from 'react';
 import ProgressiveChallenge from './components/ProgressiveChallenge.jsx';
 import './online.css';
 
-createRoot(document.getElementById('root')).render(
-  <main className="online-lab">
+function App() {
+  const [esp32Connected, setEsp32Connected] = useState(false);
+  return <main className="online-lab">
     <header className="online-header">
       <h1>Hit Dot Clown</h1>
-      <p>AI Carnival Challenge</p>
+      <div className={'header-device ' + (esp32Connected ? 'connected' : 'disconnected')} role="status">
+        <i />ESP32 {esp32Connected ? 'connected' : 'disconnected'}
+      </div>
     </header>
-    <ProgressiveChallenge browserOnly />
-  </main>,
-);
+    <ProgressiveChallenge browserOnly onControlsChange={({ connected }) => setEsp32Connected(connected)} />
+  </main>;
+}
+
+createRoot(document.getElementById('root')).render(<App />);

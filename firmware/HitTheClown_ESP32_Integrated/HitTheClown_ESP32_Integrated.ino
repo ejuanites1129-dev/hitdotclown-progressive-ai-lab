@@ -44,7 +44,7 @@ constexpr uint8_t PIEZO_INTERNAL_PULLDOWN_MASK = 0x01;
 // Array indices pair each piezo input with its same-color LED output.
 // Target order: 1 white, 2 blue, 3 green, 4 yellow, 5 red.
 // Match each LED to the same-color piezo; RX2=GPIO16 and TX2=GPIO17.
-const uint8_t LED_PINS[TARGET_COUNT] = {32, 23, 25, 26, 14};
+const uint8_t LED_PINS[TARGET_COUNT] = {32, 33, 25, 26, 14};
 const uint8_t PIEZO_PINS[TARGET_COUNT] = {21, 19, 18, 17, 16};
 #else
 // Previous analog profile. GPIO25/26 use ADC2: keep Wi-Fi off in this profile.

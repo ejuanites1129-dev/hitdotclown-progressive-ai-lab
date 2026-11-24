@@ -3,13 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": "24.x" },
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "build": "vite build",
     "export:dataset": "node --env-file=.env.local scripts/dataset.mjs export",
     "import:sqlite": "node --env-file=.env.local scripts/dataset.mjs import-sqlite"
   },
   "dependencies": {
+    "nodemailer": "^7.0.13",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

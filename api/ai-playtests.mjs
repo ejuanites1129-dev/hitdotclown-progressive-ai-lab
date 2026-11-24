@@ -7,7 +7,7 @@ export function createPlaytestHandler(openStore = createOnlinePlaytestStore, max
     const url = new URL(request.url);
     const origin = request.headers.get('Origin');
     if ((origin && origin !== url.origin) || request.headers.get('Sec-Fetch-Site') === 'cross-site') {
-      return json({ error: 'Use AI Carnival Challenge on its own page.' }, 403);
+      return json({ error: 'Use the Hit Dot Clown game on this site.' }, 403);
     }
     if (request.method === 'GET') {
       if (url.searchParams.has('export')) return json({ error: 'Dataset export is available to the study operator.' }, 403);
