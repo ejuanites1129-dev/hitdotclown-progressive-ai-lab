@@ -3,14 +3,42 @@ const statuses = new Set([
   'ROUND BREAK', 'FRENZY', 'GAME OVER', 'VICTORY',
 ]);
 
+function getPulseRates(previous, current) {
+  if (!previous || !current || !Number.isInteger(previous.uptimeMs) || !Number.isInteger(current.uptimeMs)
+    || !Array.isArray(previous.pins) || !Array.isArray(current.pins)
+    || previous.pins.some((pin, index) => pin !== current.pins[index])) return null;
+  const elapsed = (current.uptimeMs - previous.uptimeMs) >>> 0;
+  if (elapsed === 0 || elapsed > 10000 || current.pulses.some((count, index) =>
+    count < previous.pulses[index] && previous.pulses[index] < 0xffff0000)) return null;
+  return current.pulses.map((count, index) => Math.round(((count - previous.pulses[index]) >>> 0) * 1000 / elapsed));
+}
+
+function parseSensorStatus(event) {
+  const five = (values, min, max) => Array.isArray(values) && values.length === 5
+    && values.every((value) => Number.isInteger(value) && value >= min && value <= max);
+  const button = (value) => value && typeof value === 'object' && !Array.isArray(value)
+    && Number.isInteger(value.pin) && value.pin >= 0 && value.pin <= 39
+    && Number.isInteger(value.level) && (value.level === 0 || value.level === 1);
+  if (event.mode !== 'digital-pulse' || !five(event.pins, 0, 39) || new Set(event.pins).size !== 5
+    || !five(event.levels, 0, 1) || !five(event.pulses, 0, 0xffffffff)
+    || typeof event.armed !== 'boolean' || typeof event.capturing !== 'boolean'
+    || !Number.isInteger(event.uptimeMs) || event.uptimeMs < 0 || event.uptimeMs > 0xffffffff
+    || typeof event.armState !== 'string' || !button(event.start) || !button(event.reset)) return null;
+  return { type: 'sensor-status', mode: event.mode, pins: [...event.pins], levels: [...event.levels],
+    pulses: [...event.pulses], armed: event.armed, capturing: event.capturing, uptimeMs: event.uptimeMs,
+    armState: event.armState, start: { ...event.start }, reset: { ...event.reset } };
+}
+
 export function parseEsp32Event(line) {
   let event;
   try { event = JSON.parse(line); } catch { return null; }
   if (!event || typeof event !== 'object' || Array.isArray(event)) return null;
   if (event.type === 'hello' && event.device === 'HIT THE CLOWN' && event.targets === 5) {
     return { type: 'hello', version: String(event.version ?? ''), configurableLight: event.configurableLight === true,
-      configurableTimer: event.configurableTimer === true, adaptivePace: event.adaptivePace === true };
+      configurableTimer: event.configurableTimer === true, adaptivePace: event.adaptivePace === true,
+      ...(['analog', 'digital-pulse'].includes(event.sensorMode) ? { sensorMode: event.sensorMode } : {}) };
   }
+  if (event.type === 'sensor-status') return parseSensorStatus(event);
   if (event.type === 'state' && statuses.has(event.status) && Number.isInteger(event.sequenceLength)
     && Number.isInteger(event.lives) && Number.isInteger(event.playerPosition)) {
     return { ...event };
@@ -36,7 +64,8 @@ export class Esp32ProgressiveConnection {
     this.onError = onError;
     this.onLog = onLog;
     this.onDiagnostics = onDiagnostics;
-    this.diagnostics = { bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0, firmware: '' };
+    this.diagnostics = { bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0,
+      firmware: '', sensorMode: '', sensorStatus: null, pulseRates: null };
     this.port = null;
     this.reader = null;
     this.readTask = null;
@@ -55,7 +84,8 @@ export class Esp32ProgressiveConnection {
       if (this.disposed) { await port.close(); return; }
       this.port = port;
       this.stopping = false;
-      this.diagnostics = { bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0, firmware: '' };
+      this.diagnostics = { bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0,
+        firmware: '', sensorMode: '', sensorStatus: null, pulseRates: null };
       this.onDiagnostics({ ...this.diagnostics });
       this.onConnection(true);
       this.readTask = this.readLoop(port);
@@ -90,9 +120,17 @@ export class Esp32ProgressiveConnection {
                 this.onLog('RX', line);
                 const event = parseEsp32Event(line);
                 if (!event) continue;
-                if (event.type === 'hello') this.diagnostics.firmware = event.version;
+                if (event.type === 'hello') {
+                  this.diagnostics.firmware = event.version;
+                  if (event.sensorMode) this.diagnostics.sensorMode = event.sensorMode;
+                }
                 if (event.type === 'state') this.diagnostics.stateMessages++;
                 if (event.type === 'sensor-hit') this.diagnostics.hitMessages++;
+                if (event.type === 'sensor-status') {
+                  this.diagnostics.pulseRates = getPulseRates(this.diagnostics.sensorStatus, event);
+                  this.diagnostics.sensorStatus = event;
+                  this.diagnostics.sensorMode = event.mode;
+                }
                 this.onDiagnostics({ ...this.diagnostics });
                 if (event.type === 'settings') this.resolveSetting(event);
                 if (event.type === 'error') this.rejectSettings(new Error(event.message));

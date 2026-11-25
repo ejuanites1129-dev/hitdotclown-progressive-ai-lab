@@ -6,6 +6,7 @@ import { STATUS } from '../systems/gameLogic.js';
 import { chooseProgressivePace, normalizeParticipantLabel, ProgressiveGame, PROGRESSIVE_CONSENT_VERSION,
   PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
 import { DEFAULT_ROUND_SECONDS, TIMER_KEY, validRoundSeconds, requireRoundSeconds } from '../systems/timerSettings.js';
+import { createReplayCoach } from '../systems/replayCoach.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
 import audioManager from '../systems/soundtrackManager.js';
 import { exportDatabaseDataset, usePlaytestDatabase } from './usePlaytestDatabase.js';
@@ -16,6 +17,14 @@ import './ai-challenge.css';
 const path = '/api/progressive-playtests';
 const esp32Path = '/api/progressive-esp32-playtests';
 const targets = [1, 2, 3, 4, 5];
+const sensorArmHelp = {
+  inactive: 'Hits are disabled in this game phase.',
+  'waiting-low': 'Waiting for every input to return LOW.',
+  settling: 'Waiting for stable LOW inputs before re-arming.',
+  cooldown: 'Waiting for the short interval between hits.',
+  armed: 'Ready to capture the next hit.',
+  'hit-pending': 'A captured hit is waiting to be processed.',
+};
 const browserArchive = (storage) => readProgressiveArchive(storage);
 const esp32Archive = (storage) => {
   const archive = readProgressiveArchive(storage);
@@ -68,6 +77,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const [leaderboardOpen, setLeaderboardOpen] = useState(true);
   const [view, setView] = useState(null);
   const [result, setResult] = useState(null);
+  const [restarting, setRestarting] = useState(false);
   const [notice, setNotice] = useState('');
   const [ready, setReady] = useState(false);
   const [serialSupported, setSerialSupported] = useState(false);
@@ -75,11 +85,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const [deviceHello, setDeviceHello] = useState(null);
   const [deviceState, setDeviceState] = useState(null);
   const [deviceMessage, setDeviceMessage] = useState('');
-  const [serialInfo, setSerialInfo] = useState({ bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0, hitMessages: 0, firmware: '' });
+  const [serialInfo, setSerialInfo] = useState({ bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0,
+    hitMessages: 0, firmware: '', sensorMode: '', sensorStatus: null, pulseRates: null });
   const [serialLogs, setSerialLogs] = useState([]);
   const [memoryTarget, setMemoryTarget] = useState(null);
   const running = useRef(null);
   const playerSession = useRef(null);
+  const pendingHardwareRestart = useRef(null);
   const deviceRef = useRef(null);
   const deviceHandler = useRef(() => {});
   const hardwareRun = useRef(null);
@@ -95,6 +107,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const model = active?.model ?? null;
   const ended = view?.status === STATUS.OVER || view?.status === STATUS.VICTORY;
   const playing = Boolean(view && !ended);
+  const startCountdown = view?.status === STATUS.COUNTDOWN || view?.status === STATUS.TEST;
+  const interCycleBreak = view?.status === STATUS.BREAK;
+  const clockLabel = interCycleBreak
+    ? view.breakPhase === 'countdown' ? 'Race start' : 'Celebration'
+    : view?.status === STATUS.FRENZY ? 'Frenzy time' : 'Time remaining';
+  const clockValue = interCycleBreak ? view?.countdown ?? 0 : view?.time ?? 0;
+  const replayCoach = result ? createReplayCoach(result.rounds) : null;
 
   function changeSettings(next) {
     onSettingsOpenChange(typeof next === 'function' ? next(settingsOpen) : next);
@@ -171,6 +190,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       setView((current) => current ? { ...current, review: { correct: event.correct, performed: event.performed } } : current);
       return;
     }
+    if (event.type === 'sensor-status') return;
     if (event.type === 'target-active') {
       const state = hardwareState.current;
       if (state?.status === STATUS.MEMORY && event.active && hardwareRun.current?.currentCycle) {
@@ -194,6 +214,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
 
     hardwareState.current = event;
     setDeviceState(event);
+    if (event.status === STATUS.READY && pendingHardwareRestart.current) {
+      const restart = pendingHardwareRestart.current;
+      pendingHardwareRestart.current = null;
+      void startHardware(restart.participant, restart.consentVersion);
+      return;
+    }
+    if ([STATUS.COUNTDOWN, STATUS.TEST, STATUS.MEMORY, STATUS.PLAYER].includes(event.status)) setRestarting(false);
     setMemoryTarget(event.status === STATUS.MEMORY ? activeTarget.current : null);
     const tracker = hardwareRun.current;
     if (!tracker) return;
@@ -294,6 +321,11 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         else {
           setDeviceHello(null);
           setDeviceState(null);
+          setSerialInfo({ bytesReceived: 0, bytesSent: 0, linesReceived: 0, stateMessages: 0,
+            hitMessages: 0, firmware: '', sensorMode: '', sensorStatus: null, pulseRates: null });
+          hardwareState.current = null;
+          pendingHardwareRestart.current = null;
+          setRestarting(false);
           if (hardwareRun.current) {
             hardwareRun.current = null;
             running.current = null;
@@ -350,8 +382,9 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   }
 
   async function startHardware(participant, consentVersion) {
-    if (!deviceConnected || !deviceHello?.adaptivePace || deviceState?.status !== STATUS.READY) {
+    if (!deviceConnected || !deviceHello?.adaptivePace || (hardwareState.current?.status ?? deviceState?.status) !== STATUS.READY) {
       setDeviceMessage('Connect the ESP32 with the AI compatible firmware and wait for Ready.');
+      setRestarting(false);
       return;
     }
     const tracker = {
@@ -369,6 +402,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     activeTarget.current = null;
     setMemoryTarget(null);
     setResult(null);
+    setView(null);
     setDeviceMessage('Setting the first medium preview…');
     try {
       await deviceRef.current.setRoundSeconds(roundDuration);
@@ -382,6 +416,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     } catch (error) {
       hardwareRun.current = null;
       setDeviceMessage(error.message);
+      setRestarting(false);
     }
   }
 
@@ -392,7 +427,9 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     const email = playerEmail.trim().toLowerCase();
     const participant = trainModel ? username : null;
     const consentVersion = trainModel ? PROGRESSIVE_CONSENT_VERSION : null;
-    playerSession.current = { username, email, shareLeaderboard: saveScore, emailLink };
+    playerSession.current = { username, email, shareLeaderboard: saveScore, emailLink, trainModel };
+    pendingHardwareRestart.current = null;
+    setRestarting(false);
     if (targetInput === 'esp32') { void startHardware(participant, consentVersion); return; }
     const engine = new ProgressiveGame({ policy, model: policy === 'adaptive' ? model : null, roundSeconds: roundDuration });
     const run = { format: PROGRESSIVE_RUN, id: crypto.randomUUID(), input: 'browser', participant, policy, roundSeconds: roundDuration,
@@ -447,6 +484,8 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
 
   function returnToSetup() {
     if (hardwareRun.current) hardwareRun.current = null;
+    pendingHardwareRestart.current = null;
+    setRestarting(false);
     if (targetInput === 'esp32' && deviceConnected && deviceState?.status !== STATUS.READY) {
       void deviceRef.current?.sendCommand('RESET').catch(() => {});
     }
@@ -457,6 +496,52 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     setMemoryTarget(null);
     activeTarget.current = null;
     playerSession.current = null;
+  }
+
+  function restartSamePlayer() {
+    const player = playerSession.current;
+    if (!player) {
+      returnToSetup();
+      return;
+    }
+    setNotice('');
+    if (targetInput === 'esp32') {
+      if (!deviceConnected || !deviceHello?.adaptivePace) {
+        setDeviceMessage('Reconnect the AI-compatible ESP32 before restarting this physical game.');
+        return;
+      }
+      pendingHardwareRestart.current = {
+        participant: player.trainModel ? player.username : null,
+        consentVersion: player.trainModel ? PROGRESSIVE_CONSENT_VERSION : null,
+      };
+      setRestarting(true);
+      setView(null);
+      setResult(null);
+      setDeviceMessage('Resetting the booth for the same player…');
+      const connection = deviceRef.current;
+      if (!connection) {
+        pendingHardwareRestart.current = null;
+        setRestarting(false);
+        setDeviceMessage('Reconnect the ESP32 before restarting this physical game.');
+        return;
+      }
+      void connection.sendCommand('RESET').catch((error) => {
+        pendingHardwareRestart.current = null;
+        setRestarting(false);
+        setDeviceMessage(error.message);
+      });
+      return;
+    }
+    beginChallenge({ saveScore: player.shareLeaderboard, trainModel: player.trainModel, emailLink: player.emailLink });
+  }
+
+  function returnHome() {
+    returnToSetup();
+    setPlayerName('');
+    setPlayerEmail('');
+    setShareLeaderboard(false);
+    setShareAiData(false);
+    setSendLeaderboardEmail(false);
   }
 
   async function exportRuns() {
@@ -501,7 +586,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   </section>;
 
   return <section className="ai-carnival progressive-carnival" aria-label="Hit Dot Clown">
-    {!view && <div className={'lobby-layout' + (leaderboardOpen ? ' has-leaderboard' : ' leaderboard-collapsed')}>
+    {!view && !restarting && <div className={'lobby-layout' + (leaderboardOpen ? ' has-leaderboard' : ' leaderboard-collapsed')}>
       <section className="ready-card" aria-labelledby="ready-title">
         <p className="lobby-eyebrow">Step right up</p>
         <h1 id="ready-title">Ready to play?</h1>
@@ -529,24 +614,30 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
       {leaderboardOpen && <LeaderboardPanel entries={leaderboard.entries} pending={leaderboard.pending} message={leaderboard.message}
         configured={leaderboard.configured} refresh={leaderboard.refresh} />}
     </div>}
-    {!view && consentOpen && <div className="ai-consent-backdrop">
+    {!view && restarting && <section className="ai-panel progressive-restart-wait" role="status" aria-live="polite">
+      <h2>Restarting your game</h2>
+      <p>{targetInput === 'esp32' ? 'The booth is resetting. Your player name and selected sharing choices will carry over.' : 'Preparing another game for the same player…'}</p>
+      {deviceMessage && targetInput === 'esp32' && <p className="ai-note">{deviceMessage}</p>}
+      <button type="button" onClick={returnHome}>Return to home</button>
+    </section>}
+    {!view && !restarting && consentOpen && <div className="ai-consent-backdrop">
       <section className="ai-consent-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-consent-title" aria-describedby="ai-consent-copy">
         <h2 id="ai-consent-title">Before your game</h2>
         <p id="ai-consent-copy">If you choose to save, your name, email, score, and game start/end times go to the Hit Dot Clown leaderboard database. The public board shows only the username, best score, and date played; your email remains private.</p>
-        <p className="ai-note">You can play without saving. If a save cannot connect, the game result and entered contact details wait in this browser until they sync.</p>
+        <p className="ai-note">You can play without saving. If a save cannot connect, the game result and entered contact details wait in this browser until they sync. Restarting reuses this player and these choices; return home to clear the details for the next player.</p>
         <form onSubmit={agreeAndStart}>
           <label className="consent-choice"><input type="checkbox" checked={shareLeaderboard} onChange={(event) => {
             setShareLeaderboard(event.target.checked);
             if (!event.target.checked) { setShareAiData(false); setSendLeaderboardEmail(false); }
           }} />
-            Save this game to the leaderboard using the name and email I entered.</label>
+            Save this game and games I restart during this visit to the leaderboard using the name and email I entered.</label>
           <label className={'consent-choice' + (!shareLeaderboard || policy !== 'adaptive' ? ' disabled' : '')}>
             <input type="checkbox" checked={shareAiData} disabled={!shareLeaderboard || policy !== 'adaptive'} onChange={(event) => setShareAiData(event.target.checked)} />
-            Also share round outcomes, pace, sequence lengths, and timing with the AI Lab to improve Adaptive Pace. This is optional and uses my leaderboard name, not my email.
+            Also share round outcomes, pace, sequence lengths, and timing from this game and restarted games with the AI Lab to improve Adaptive Pace. This is optional and uses my leaderboard name, not my email.
           </label>
           <label className={'consent-choice' + (!shareLeaderboard ? ' disabled' : '')}>
             <input type="checkbox" checked={sendLeaderboardEmail} disabled={!shareLeaderboard} onChange={(event) => setSendLeaderboardEmail(event.target.checked)} />
-            Email me a link to the public leaderboard at the address I entered.
+            Email me a leaderboard link for this game and any game I restart during this visit.
           </label>
           {consentError && <p className="ai-consent-error" role="alert">{consentError}</p>}
           <div className="ai-actions">
@@ -557,25 +648,49 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         </form>
       </section>
     </div>}
-    {view && <section className="ai-panel ai-round" aria-label="Progressive game">
-      <div className="ai-round-head">
-        <div><p className="ai-eyebrow">Cycle {view.cycle} · {view.sequenceLength} flashes</p><h2>{phase(view)}</h2></div>
-        {view.pace && <span className="ai-pill">{SPEEDS[view.pace.speed].label} · {SPEEDS[view.pace.speed].ms} ms</span>}
-      </div>
-      <div className="ai-stats"><span>Score {view.score}</span><span>{view.time} s left</span><span>{view.lives} lives</span>
-        {!ended && <span>{view.playerPosition} / {view.sequenceLength} hits</span>}</div>
-      {!ended && view.pace && <p className="ai-note">{view.pace.source}
-        {view.pace.probability !== undefined && ` · Estimated clear chance ${Math.round(view.pace.probability * 100)}%`}</p>}
-      {!ended && targetInput === 'esp32' && <p className="ai-note">Hit the connected physical targets. The on-screen targets show the board lights.</p>}
-      {!ended && <>
-        <div className="ai-targets" aria-label="Game targets">{targets.map((target) => {
+    {view && <section className={'ai-panel ai-round progressive-game-screen' + (startCountdown ? ' is-countdown' : '')} aria-label="Progressive game">
+      {startCountdown ? <div className="progressive-countdown" aria-label="Game starting countdown">
+        <p className="progressive-game-status">{view.status === STATUS.TEST ? 'Checking the lights' : 'Get ready'}</p>
+        <output className="progressive-countdown-number" aria-live="assertive">
+          {view.status === STATUS.TEST ? 'LED test' : view.countdown || 3}
+        </output>
+        <div className="progressive-countdown-lights" aria-hidden="true">
+          {targets.map((target) => <span key={target} className={view.ledTesting ? 'is-on' : ''}>{target}</span>)}
+        </div>
+        <p className="progressive-countdown-help">{view.status === STATUS.TEST
+          ? 'Checking all five target lights.' : 'Eyes on the targets. The sequence starts next.'}</p>
+      </div> : <>
+        {!ended && <>
+          <output className="progressive-game-status" aria-live="polite">
+            {view.status === STATUS.MEMORY ? 'Watch the lights · Timer is running' : phase(view)}
+          </output>
+          <p className="progressive-cycle-caption">Cycle {view.cycle} · {view.sequenceLength} steps</p>
+        </>}
+        <div className="progressive-scoreboard" aria-label="Live game score and timer">
+          <dl className="progressive-metric score">
+            <dt>{ended ? 'Final score' : 'Score'}</dt>
+            <dd>{String(view.score).padStart(3, '0')}</dd>
+          </dl>
+          <dl className={'progressive-metric time' + (!ended && !interCycleBreak && view.time <= 10 ? ' is-urgent' : '')}>
+            <dt>{ended ? 'Time at end' : clockLabel}</dt>
+            <dd>{String(clockValue).padStart(2, '0')}<small>s</small></dd>
+          </dl>
+        </div>
+        {!ended && <div className="progressive-game-meta">
+          <span>{view.lives} lives</span>
+          {playable && <span>{view.playerPosition} / {view.sequenceLength} hits</span>}
+          {view.pace && <span>{SPEEDS[view.pace.speed].label} preview · {view.pace.source}
+            {view.pace.probability !== undefined && ` · Estimated clear chance ${Math.round(view.pace.probability * 100)}%`}</span>}
+        </div>}
+        {!ended && targetInput === 'esp32' && <p className="progressive-input-hint">Hit the connected physical targets on the booth.</p>}
+        {!ended && targetInput === 'browser' && <div className="ai-targets progressive-browser-targets" aria-label="Game targets">{targets.map((target) => {
           const lit = view.ledTesting || view.allTargetsOn || view.activeTarget === target;
           const feedback = view.feedbackTarget === target ? (view.correct ? ' is-correct' : ' is-wrong') : '';
-          return <button type="button" key={target} aria-label={'Hit target ' + target} disabled={!playable || targetInput === 'esp32'}
+          return <button type="button" key={target} aria-label={'Hit target ' + target} disabled={!playable}
             className={'ai-target' + (lit ? ' is-lit' : '') + feedback}
             onClick={() => hit(target)}>{target}</button>;
-        })}</div>
-        <button type="button" onClick={returnToSetup}>End practice</button>
+        })}</div>}
+        {!ended && <button type="button" className="progressive-end-button" onClick={returnToSetup}>End practice</button>}
       </>}
       {ended && result && <>
         <p><strong>{cleared} {cleared === 1 ? 'cycle' : 'cycles'} cleared.</strong></p>
@@ -583,12 +698,25 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
           ? 'Your score is queued and will sync to the leaderboard.' : 'Your game result has been sent to the leaderboard.'}</p>}
         {playerSession.current?.shareLeaderboard && playerSession.current?.emailLink && <p className="ai-note">{notice || 'Your leaderboard-link email is being processed.'}</p>}
         {!result.consentVersion && <p className="ai-note">This playthrough was not sent to the AI Lab or saved in the browser playtest archive.</p>}
+        {replayCoach && <section className="progressive-coach" aria-labelledby="progressive-coach-title">
+          <div className="progressive-coach-heading">
+            <span>Personalized game review</span>
+            <h3 id="progressive-coach-title">Replay Coach</h3>
+          </div>
+          <p className="progressive-coach-summary">{replayCoach.summary}</p>
+          <p className="progressive-coach-details">{replayCoach.details}</p>
+          <p className="progressive-coach-tip"><strong>Next time:</strong> {replayCoach.recommendation}</p>
+        </section>}
         {view.review && <div className="progressive-review">
           <p><strong>Correct sequence</strong> {view.review.correct.join(' · ')}</p>
           <p><strong>Your hits</strong> {view.review.performed.length ? view.review.performed.join(' · ') : 'None recorded'}</p>
         </div>}
-        <div className="ai-actions"><button type="button" className="ai-primary" onClick={returnToSetup}>Play again</button>
-          <button type="button" onClick={() => download(result, 'hit-dot-clown-progressive-run.json')}>Download this run</button></div>
+        <p className="ai-note">Restart keeps this player and the choices made before the game. Return to home clears the name and email for the next player.</p>
+        <div className="ai-actions progressive-result-actions">
+          <button type="button" className="ai-primary" disabled={restarting} onClick={restartSamePlayer}>Restart game</button>
+          <button type="button" onClick={returnHome}>Return to home</button>
+          <button type="button" onClick={() => download(result, 'hit-dot-clown-progressive-run.json')}>Download this run</button>
+        </div>
       </>}
     </section>}
     <dialog ref={settingsDialog} className="settings-dialog ai-settings-dialog" aria-labelledby="settings-title"
@@ -642,7 +770,23 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         </section>
         <section className="operator-section ai-settings-section" aria-label="ESP32 serial monitor">
           <h3>Serial monitor</h3>
-          <p className="display-help">Firmware: <strong>{deviceConnected ? serialInfo.firmware || 'Checking…' : 'Not connected'}</strong> · Game phase: {deviceState?.status || 'READY'} · RX: {serialInfo.bytesReceived} bytes · TX: {serialInfo.bytesSent} bytes · States: {serialInfo.stateMessages} · Hits: {serialInfo.hitMessages}</p>
+          <p className="display-help">Firmware: <strong>{deviceConnected ? serialInfo.firmware || 'Checking…' : 'Not connected'}</strong> · Sensor input: {serialInfo.sensorMode || deviceHello?.sensorMode || 'Unknown'} · Game phase: {deviceState?.status || 'READY'} · RX: {serialInfo.bytesReceived} bytes · TX: {serialInfo.bytesSent} bytes · States: {serialInfo.stateMessages} · Scored hits: {serialInfo.hitMessages}</p>
+          {serialInfo.sensorStatus ? <>
+            <p className="display-help">START D{serialInfo.sensorStatus.start.pin}: <strong>{serialInfo.sensorStatus.start.level ? 'Released' : 'Pressed'}</strong> · RESET D{serialInfo.sensorStatus.reset.pin}: <strong>{serialInfo.sensorStatus.reset.level ? 'Released' : 'Pressed'}</strong></p>
+            <p className="display-help">{sensorArmHelp[serialInfo.sensorStatus.armState] || 'Live piezo inputs'} Armed: {serialInfo.sensorStatus.armed ? 'Yes' : 'No'} · Capturing: {serialInfo.sensorStatus.capturing ? 'Yes' : 'No'}</p>
+            <div className="table-scroll progressive-sensor-scroll"><table className="display-sensor-table"><caption>Live piezo inputs · totals include captured rising edges</caption>
+              <thead><tr><th scope="col">Target</th><th scope="col">GPIO</th><th scope="col">Level</th><th scope="col">Raw pulses</th><th scope="col">Pulses/s</th></tr></thead>
+              <tbody>{serialInfo.sensorStatus.pins.map((pin, index) => <tr key={pin}>
+                <td>{index + 1}</td><td>D{pin}</td><td>{serialInfo.sensorStatus.levels[index] ? 'HIGH' : 'LOW'}</td>
+                <td>{serialInfo.sensorStatus.pulses[index]}</td><td>{serialInfo.pulseRates?.[index] ?? '—'}</td>
+              </tr>)}</tbody>
+            </table></div>
+            <p className="display-help">Tap one physical target at a time and watch its raw pulse total rise. One impact can create several electrical edges; scored hits above count only impacts the game accepted.</p>
+          </> : <p className="display-help" role="status">{deviceConnected
+            ? ((serialInfo.sensorMode || deviceHello?.sensorMode) === 'analog'
+              ? 'This firmware reports analog sensor mode, so live digital pulse totals are not available.'
+              : 'Waiting for live piezo status. If it stays this way, update the connected ESP32 to the AI Lab firmware.')
+            : 'Connect the AI-compatible ESP32 to view live piezo pulses for each target.'}</p>}
           <div className="display-operator-row"><button type="button" className="display-button" onClick={() => { setSerialLogs([]); lastLoggedState.current = ''; }}>Clear log</button>
             <span className="display-help">Recent ESP32 messages, up to 1,000 lines</span></div>
           <textarea className="serial-log" ref={serialLogView} readOnly aria-label="ESP32 serial message log"
