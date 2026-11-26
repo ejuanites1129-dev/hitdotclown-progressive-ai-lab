@@ -40,18 +40,30 @@ export function chooseProgressivePace({ previous, sequenceLength, livesAtStart, 
   if (policy === 'collect') return { speed: available[Math.floor(random() * available.length)], source: 'Randomized pace' };
   const nearby = available.filter((speed) => Math.abs(speed - previous.speed) <= 1);
   const choices = nearby.length ? nearby : available;
+  const performanceAdjustment = previous.misses || livesAtStart === 1
+    ? -1
+    : previous.playMs / Math.max(1, previous.correctHits) < 950 ? 1 : 0;
+  const adjustedSpeed = choices.reduce((best, speed) =>
+    Math.abs(speed - (previous.speed + performanceAdjustment)) < Math.abs(best - (previous.speed + performanceAdjustment)) ? speed : best,
+  choices[0]);
   const coverage = model?.coverage;
   if (model?.format === PROGRESSIVE_MODEL && (model.input === input || model.input === 'combined' && ['browser', 'esp32'].includes(input))
     && sequenceLength >= coverage?.minSequenceLength
     && sequenceLength <= coverage?.maxSequenceLength && roundSeconds >= coverage?.minRoundSeconds && roundSeconds <= coverage?.maxRoundSeconds) {
+    // Strong evidence from the player's last cycle must be able to move pace.
+    // Otherwise a model trained mostly on Medium examples can get stuck there.
+    if (performanceAdjustment !== 0) {
+      return { speed: adjustedSpeed,
+        probability: predictCompletion(model.tree, progressiveFeatures(previous, { sequenceLength, speed: adjustedSpeed, input, livesAtStart, roundSeconds })),
+        source: previous.misses || livesAtStart === 1 ? 'Performance adjustment after misses' : 'Performance adjustment after quick clear' };
+    }
     const [best] = choices.map((speed) => ({
       speed, probability: predictCompletion(model.tree, progressiveFeatures(previous, { sequenceLength, speed, input, livesAtStart, roundSeconds })),
     })).sort((a, b) => Math.abs(a.probability - 0.7) - Math.abs(b.probability - 0.7)
       || Math.abs(a.speed - previous.speed) - Math.abs(b.speed - previous.speed));
     return { ...best, source: 'Human playtest-trained model' };
   }
-  const desired = previous.speed + (previous.misses || livesAtStart === 1 ? -1 : previous.playMs / previous.correctHits < 950 ? 1 : 0);
-  const [speed] = choices.sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired));
+  const speed = adjustedSpeed;
   return { speed, source: 'Rule-based pace' };
 }
 

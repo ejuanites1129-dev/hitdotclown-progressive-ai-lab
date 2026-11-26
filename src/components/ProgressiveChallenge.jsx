@@ -679,8 +679,11 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
         {!ended && <div className="progressive-game-meta">
           <span>{view.lives} lives</span>
           {playable && <span>{view.playerPosition} / {view.sequenceLength} hits</span>}
-          {view.pace && <span>{SPEEDS[view.pace.speed].label} preview · {view.pace.source}
-            {view.pace.probability !== undefined && ` · Estimated clear chance ${Math.round(view.pace.probability * 100)}%`}</span>}
+          {view.pace && <span className={'progressive-pace-indicator pace-' + SPEEDS[view.pace.speed].label.toLowerCase()} aria-live="polite">
+            <strong>{SPEEDS[view.pace.speed].label} preview</strong>
+            <span>{SPEEDS[view.pace.speed].ms} ms per light</span>
+            <small>{view.pace.source}{view.pace.probability !== undefined && ` · Estimated clear chance ${Math.round(view.pace.probability * 100)}%`}</small>
+          </span>}
         </div>}
         {!ended && targetInput === 'esp32' && <p className="progressive-input-hint">Hit the connected physical targets on the booth.</p>}
         {!ended && targetInput === 'browser' && <div className="ai-targets progressive-browser-targets" aria-label="Game targets">{targets.map((target) => {
