@@ -6,6 +6,7 @@ import { STATUS } from '../systems/gameLogic.js';
 import { chooseProgressivePace, normalizeParticipantLabel, ProgressiveGame, PROGRESSIVE_CONSENT_VERSION,
   PROGRESSIVE_RUN, readProgressiveArchive, saveProgressiveRun } from '../systems/progressivePractice.js';
 import { DEFAULT_ROUND_SECONDS, TIMER_KEY, validRoundSeconds, requireRoundSeconds } from '../systems/timerSettings.js';
+import { RACE_COUNTDOWN_MS, SUCCESS_MS } from '../systems/targetingEffects.js';
 import { createReplayCoach } from '../systems/replayCoach.js';
 import { Esp32ProgressiveConnection } from '../systems/esp32ProgressiveConnection.js';
 import audioManager from '../systems/soundtrackManager.js';
@@ -73,7 +74,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   const settingsDialog = useRef(null);
   const serialLogView = useRef(null);
   const lastLoggedState = useRef('');
-  const previousAudioState = useRef(null);
+  const previousAudioState = useRef({ status: null, breakPhase: null });
   const [leaderboardOpen, setLeaderboardOpen] = useState(true);
   const [view, setView] = useState(null);
   const [result, setResult] = useState(null);
@@ -204,6 +205,7 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
     if (event.type === 'sensor-hit') {
       const tracker = hardwareRun.current;
       const state = hardwareState.current;
+      audioManager.play(event.correct ? 'hit' : 'wrong');
       if (tracker?.currentCycle && state?.status === STATUS.PLAYER) {
         tracker.currentCycle.hits.push({ target: event.target, correct: event.correct, at: Date.now() });
       }
@@ -276,21 +278,30 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   useEffect(() => {
     const status = view?.status;
     const previous = previousAudioState.current;
+    const breakPhase = view?.breakPhase ?? '';
     const scene = status === STATUS.FRENZY ? 'frenzy'
       : [STATUS.MEMORY, STATUS.PLAYER, STATUS.HIT, STATUS.WRONG, STATUS.BREAK].includes(status) ? 'gameplay'
         : status === STATUS.COUNTDOWN || status === STATUS.TEST || !status || ended ? 'idle' : 'silent';
     audioManager.setScene(scene);
     audioManager.updateWarning(view?.time, [STATUS.MEMORY, STATUS.PLAYER, STATUS.HIT, STATUS.WRONG].includes(status));
-    if (status && status !== previous) {
+    const statusChanged = status !== previous.status;
+    const breakPhaseChanged = status === STATUS.BREAK && breakPhase !== previous.breakPhase;
+    if (status === STATUS.BREAK && (statusChanged || breakPhaseChanged)) {
+      audioManager.stopEffects();
+      const isCountdown = breakPhase === 'countdown';
+      audioManager.playTimed(isCountdown ? 'raceCountdown' : 'roundComplete',
+        isCountdown ? RACE_COUNTDOWN_MS : SUCCESS_MS, view?.phaseMs || 0);
+    } else if (status && statusChanged) {
+      if ([STATUS.READY, STATUS.COUNTDOWN, STATUS.MEMORY, STATUS.VICTORY, STATUS.OVER].includes(status)
+        || previous.status === STATUS.BREAK) {
+        audioManager.stopEffects();
+      }
       if (status === STATUS.COUNTDOWN) audioManager.play('start');
-      else if (status === STATUS.HIT) audioManager.play('hit');
-      else if (status === STATUS.WRONG) audioManager.play('wrong');
       else if (status === STATUS.FRENZY) audioManager.play('frenzy');
       else if (status === STATUS.VICTORY) audioManager.play('victory');
       else if (status === STATUS.OVER) audioManager.play(view?.time === 0 ? 'timeout' : 'gameover');
-      else if (status === STATUS.BREAK && view?.breakPhase === 'success') audioManager.play('roundComplete');
     }
-    previousAudioState.current = status ?? null;
+    previousAudioState.current = { status: status ?? null, breakPhase };
   }, [view?.status, view?.time, view?.breakPhase, ended]);
 
   useEffect(() => {
@@ -479,7 +490,13 @@ export default function ProgressiveChallenge({ onControlsChange, browserOnly = f
   function hit(target) {
     if (targetInput === 'esp32') return;
     const current = running.current;
-    if (current) show(current, current.engine.hit(target));
+    if (!current) return;
+    const previousFrenzyHits = current.engine.state.frenzyHits;
+    const next = current.engine.hit(target);
+    if (next.status === STATUS.HIT) audioManager.play('hit');
+    else if (next.status === STATUS.WRONG) audioManager.play('wrong');
+    else if (next.status === STATUS.FRENZY && next.frenzyHits > previousFrenzyHits) audioManager.play('hit');
+    show(current, next);
   }
 
   function returnToSetup() {
